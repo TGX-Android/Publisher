@@ -1,0 +1,39 @@
+{
+  "app": {
+    "id": "org.thunderdog.challegram",
+    "name": "Telegram X",
+    "download_url": "https://telegram.org/dlx",
+    "sources_url": "https://github.com/TGX-Android/Telegram-X"
+  },
+  "telegram": {
+    "app": {
+      "api_id": 0,
+      "api_hash": "https://core.telegram.org/api/obtaining_api_id"
+    },
+    "server": {
+      "api_id": 0,
+      "api_hash": "https://core.telegram.org/api/obtaining_api_id"
+    },
+    "admin_user_id": 0,
+    "target_chat_id": {
+      "public_builds": "numeric chat_id or @username",
+      "private_builds": "numeric chat_id or @username"
+    }
+  },
+  "youtube": {
+    "api_key": "YouTube api key"
+  },
+  "url": {
+    "testing": "https://play.google.com/apps/testing/org.thunderdog.challegram",
+    "market": "https://play.google.com/store/apps/details?id=org.thunderdog.challegram"
+  },
+  "tokens": {
+    "builder": {
+      "debug": "bot token of builder bot to run on debug machine",
+      "production": "bot token to builder bot run on production machine"
+    },
+    "verifier": {
+      "production": "bot token of verifier bot to run on production machine"
+    }
+  }
+}
