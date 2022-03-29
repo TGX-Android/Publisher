@@ -2,7 +2,7 @@
 
 ![Telegram X Publisher](/images/cover.png)
 
-This is the complete source code for the solution that automatically pulls the latest [Telegram X](https://github.com/TGX-Android/Telegram-X) commit, builds and publishes it to [Google Play](https://play.google.com/store/apps/details?id=org.thunderdog.challegram), gives almost real-time build process updates in the [special channel](https://tgx_log) and [provides the way](https://t.me/tgx_bot) to check whether APK hash corresponds to any of the APKs built through this solution.
+This is the complete source code for the solution that automatically pulls the latest [Telegram X](https://github.com/TGX-Android/Telegram-X) commit, builds and publishes it to [Google Play](https://play.google.com/store/apps/details?id=org.thunderdog.challegram), gives almost real-time build process updates in the [special channel](https://t.me/tgx_log) and [provides the way](https://t.me/tgx_bot) to check whether APK hash corresponds to any of the APKs built through this solution.
 
 **This solution is made as a tool for the official [Telegram X source code](https://github.com/TGX-Android/Telegram-X) and is not designed to be used in other projects.**
 
