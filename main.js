@@ -1952,6 +1952,9 @@ function processPublicCommand (botId, bot, msg, command, commandArgs) {
 }
 
 function messageCallback (botId, bot, msg) {
+  if (msg.chat.type !== 'private')
+    return;
+  
   storeObject('user', msg.from);
   storeObject('user', msg.forward_from);
   storeObject('chat', msg.sender_chat);
