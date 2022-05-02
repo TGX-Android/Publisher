@@ -41,6 +41,8 @@ function checkPath (path) {
 
 const LOCAL = process.env.TGX_PRODUCTION !== '1';
 const settings = JSON.parse(fs.readFileSync(path.join(__dirname, 'settings.json'), 'UTF-8'));
+if (!settings.app.id || !settings.app.id.match(/^(?!\.)[a-z0-9._]+(?!\.)$/))
+  throw Error('app.id is not specified in settings.json or not valid: ' + settings.app.id);
 
 const TESTING_URL = settings.url.testing;
 const MARKET_URL = settings.url.market;
@@ -54,7 +56,7 @@ const TELEGRAM_API_TOKEN_2 = settings.tokens.verifier.production;
 const TELEGRAM_APP_ID = process.env.TELEGRAM_APP_ID || settings.telegram.server.api_id;
 const TELEGRAM_APP_HASH = process.env.TELEGRAM_APP_HASH || settings.telegram.server.api_hash;
 
-const PACKAGE_NAME = settings.app.api_id;
+const PACKAGE_NAME = settings.app.id;
 
 ['TGX_SOURCE_PATH', 'TGX_KEYSTORE_PATH', 'ANDROID_SDK_ROOT', 'GOOGLE_TOKEN_PATH'].forEach((path) => {
   if (!checkPath(process.env[path]) && !(LOCAL && path === 'GOOGLE_TOKEN_PATH')) {
@@ -1265,7 +1267,7 @@ function processPrivateCommand (botId, bot, msg, command, commandArgs) {
             fs.writeFile(settings.TGX_SOURCE_PATH + '/local.properties',
               'sdk.dir=' + settings.ANDROID_SDK_ROOT + '\n' +
               'keystore.file=' + settings.TGX_KEYSTORE_PATH + '\n' +
-              'app.id=' + settings.app.api_id + '\n' +
+              'app.id=' + settings.app.id + '\n' +
               'app.name=' + settings.app.name + '\n' +
               'app.download_url=' + settings.app.download_url + '\n' +
               'app.sources_url=' + (pullRequestId ? build.remoteUrl + '/pull/' + pullRequestId : settings.app.sources_url) + '\n' +
