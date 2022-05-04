@@ -800,7 +800,10 @@ function uploadToTelegram (bot, task, build, variant, onDone) {
     apkStream.close();
     files.apkFile.remote_id = message.document.file_id;
     onDone(0);
-  }).catch(onGlobalError);
+  }).catch((e) => {
+    console.error('Cannot upload telegram file', e);
+    onDone(1);
+  });
 
   return async () => {
     if (!task.endTime) {
