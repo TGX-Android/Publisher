@@ -1072,11 +1072,11 @@ function toDisplayPullRequestList (build) {
     return build.pullRequestIds.map((pullRequestId) => {
       const pullRequest = build.pullRequests[pullRequestId];
       if (pullRequest) {
-        return '<a href="' + build.remoteUrl + '/pull/' + pullRequestId + '/commits/' + pullRequest.commit.long + '">#' + pullRequestId + ' (' + pullRequest.commit.short + ')</a>';
+        return '<a href="' + build.remoteUrl + '/pull/' + pullRequestId + '/commits/' + pullRequest.commit.long + '">' + pullRequestId + '</a> <code>' + pullRequest.commit.short + '</code>';
       } else {
-        return '<code>#' + pullRequestId + '</code>';
+        return '<code>' + pullRequestId + '</code>';
       }
-    });
+    }).join(', ');
   } else if (build.pullRequests) {
     let result = '';
     let first = true;
@@ -1087,7 +1087,7 @@ function toDisplayPullRequestList (build) {
         result += ', ';
       }
       const pullRequest = build.pullRequests[pullRequestId];
-      result += '<a href="' + build.remoteUrl + '/pull/' + pullRequestId + '/commits/' + pullRequest.commit.long + '">#' + pullRequestId + ' (' + pullRequest.commit.short + ')</a>';
+      result += '<a href="' + build.remoteUrl + '/pull/' + pullRequestId + '/commits/' + pullRequest.commit.long + '">' + pullRequestId + '</a> <code>' + pullRequest.commit.short + '</code>';
     }
   } else {
     return '';
