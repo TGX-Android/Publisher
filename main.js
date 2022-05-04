@@ -595,7 +595,7 @@ function getBuildFiles (build, variant, callback) {
     }
   };
 
-  const prefix = '^Telegram-X-' + build.version.name.replace(/\./gi, '\\.') + (architecture ? '(?:-' + architecture + ')?' : '') + (build.branch !== 'main' ? '(?:-' + build.branch + ')?' : '');
+  const prefix = '^Telegram-X-' + build.version.name.replace(/\./gi, '\\.') + '(?:\\+[0-9,]+)?' + (architecture ? '(?:-' + architecture + ')?' : '') ;
   fs.exists(nativeDebugSymbolsFile, (exists) => {
     result.nativeDebugSymbolsFile = exists ? {path: nativeDebugSymbolsFile} : null;
     check();
