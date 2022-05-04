@@ -647,14 +647,12 @@ function getBuildFiles (build, variant, callback) {
 function getFromToCommit (build) {
   if (build.googlePlayTrack) {
     if (build.previousGooglePlayBuild &&
-        build.previousGooglePlayBuild.remoteUrl === build.remoteUrl /*&&
-        build.previousGooglePlayBuild.branch == build.branch*/) {
+        build.previousGooglePlayBuild.remoteUrl === build.remoteUrl) {
       return build.previousGooglePlayBuild.commit.short + '...' + build.commit.short;
     }
   } else if (build.telegramTrack) {
     if (build.previousTelegramBuild &&
-        build.previousTelegramBuild.remoteUrl === build.remoteUrl /*&&
-        build.previousTelegramBuild.branch == build.branch*/) {
+        build.previousTelegramBuild.remoteUrl === build.remoteUrl) {
       return build.previousTelegramBuild.commit.short + '...' + build.commit.short;
     }
   }
@@ -671,23 +669,9 @@ function getBuildCaption (build, variant, isPrivate) {
     caption += '\n';
     caption += '<b>Commit</b>: <a href="' + build.remoteUrl + '/commit/' + build.commit.long + '">' + build.commit.short + '</a>';
   }
-  if (build.branch !== 'main') {
+  if (build.pullRequestIds || !empty(build.pullRequests)) {
     caption += '\n';
-    caption += '<b>Branch</b>: <code>' + build.branch + '</code>';
-  }
-  if (!empty(build.pullRequests)) {
-    caption += '\n';
-    caption += '<b>Pull requests</b>: ';
-    let isFirst = true;
-    for (const pullRequestId in build.pullRequests) {
-      if (isFirst) {
-        isFirst = false;
-      } else {
-        caption += ', ';
-      }
-      const pullRequest = build.pullRequests[pullRequestId];
-      caption += '<a href="' + build.remoteUrl + '/pull/' + pullRequestId + '/commits/' + pullRequest.commit.long + '">#' + pullRequestId + ' (' + pullRequest.commit.short + ')</a>'
-    }
+    caption += '<b>Pull requests</b>: ' + toDisplayPullRequestList(build);
   }
   caption += '\n';
   const checksums = ['md5', 'sha1', 'sha256'];
@@ -1080,6 +1064,33 @@ function sendArray (bot, chatId, array, parseMode, delimiter) {
     if (remaining == 0) {
       bot.sendMessage(chatId, text, {parse_mode: parseMode}).catch(onGlobalError);
     }
+  }
+}
+
+function toDisplayPullRequestList (build) {
+  if (build.pullRequestIds) {
+    return build.pullRequestIds.map((pullRequestId) => {
+      const pullRequest = build.pullRequests[pullRequestId];
+      if (pullRequest) {
+        return '<a href="' + build.remoteUrl + '/pull/' + pullRequestId + '/commits/' + pullRequest.commit.long + '">#' + pullRequestId + ' (' + pullRequest.commit.short + ')</a>';
+      } else {
+        return '<code>#' + pullRequestId + '</code>';
+      }
+    });
+  } else if (build.pullRequests) {
+    let result = '';
+    let first = true;
+    for (const pullRequestId in build.pullRequests) {
+      if (first) {
+        first = false;
+      } else {
+        result += ', ';
+      }
+      const pullRequest = build.pullRequests[pullRequestId];
+      result += '<a href="' + build.remoteUrl + '/pull/' + pullRequestId + '/commits/' + pullRequest.commit.long + '">#' + pullRequestId + ' (' + pullRequest.commit.short + ')</a>';
+    }
+  } else {
+    return '';
   }
 }
 
@@ -1558,8 +1569,8 @@ function processPrivateCommand (botId, bot, msg, command, commandArgs) {
             } else {
               result += '\n<b>Commit</b>: ' + commitUrl;
             }
-            if (build.branch !== 'main' || !isPublic) {
-              result += '\n<b>Branch</b>: <code>' + build.branch + '</code>';
+            if (build.pullRequestIds || !empty(build.pullRequests)) {
+              result += '\n<b>Pull requests</b>: ' + toDisplayPullRequestList(build);
             }
             if (!isPrivate && commandArgs) {
               result += '\n\n';
@@ -1953,27 +1964,6 @@ function getChecksumMessage (checksum, apk, displayChecksum) {
   text += 'corresponds to ';
   text += '<b>' + (!apk.branch || apk.branch === 'main' ? 'official' : 'unofficial') + ' Telegram X</b> build.';
 
-  if (!empty(apk.pullRequests)) {
-    text += '\n\n';
-    text += 'It includes the following <b>pull requests</b>: '
-    let first = true;
-    for (const pullRequestId in apk.pullRequests) {
-      if (first) {
-        first = false;
-      } else {
-        text += ', ';
-      }
-      const pullRequest = apk.pullRequests[pullRequestId];
-      text += '<a href="' + apk.remoteUrl + '/pull/' + pullRequestId + '/commits/' + pullRequest.commit.long + '>#' + pullRequest.commit.short + '</a>';
-    }
-  }
-
-  if (apk.branch.startsWith('pull-request-')) {
-    const prId = apk.branch.substring('pull-request-'.length);
-    text += '<b>pull request #' + prId + '</b> build.\n\n';
-    text += 'It is <b>not official</b>, but you can check the <a href="' + apk.remoteUrl + '/pull/' + prId + '">source code</a>.';
-  }
-
   if (apk.googlePlayTrack) {
     text += '\n\n';
     text += 'This build was published to <b>Google Play' + (apk.googlePlayTrack === 'stable' ? '' : ' ' + ucfirst(apk.googlePlayTrack)) + '</b>.';
@@ -1982,6 +1972,10 @@ function getChecksumMessage (checksum, apk, displayChecksum) {
   text += '\n\n';
   text += '<b>Version</b>: <code>' + apk.version.name + '-' + getDisplayVariant(apk.variant) + '</code>\n';
   text += '<b>Commit</b>: <a href="' + apk.remoteUrl + '/commit/' + apk.commit.long + '">' + apk.commit.short + '</a>';
+  if (apk.pullRequestIds || !empty(apk.pullRequests)) {
+    text += '\n';
+    text += '<b>Pull requests</b>: ' + toDisplayPullRequestList(apk);
+  }
 
   return text;
 }
