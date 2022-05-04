@@ -279,7 +279,7 @@ function gitPull (callback) {
 }
 
 function getGitData (callback) {
-  exec('echo "$(git rev-parse --short HEAD) $(git rev-parse HEAD) $(git show -s --format=%ct) $(git config --get remote.origin.url) $(git rev-parse --abbrev-ref HEAD)"', {cwd: settings.TGX_SOURCE_PATH}, (error, stdout, stderr) => {
+  exec('echo "$(git rev-parse --short HEAD) $(git rev-parse HEAD) $(git show -s --format=%ct) $(git config --get remote.origin.url) $(git rev-parse --abbrev-ref HEAD) $(git log -1 --pretty=format:\'%an\')"', {cwd: settings.TGX_SOURCE_PATH}, (error, stdout, stderr) => {
     if (error) {
       throw error;
     }
@@ -297,7 +297,8 @@ function getGitData (callback) {
         long: result[1]
       },
       remoteUrl: remoteUrl,
-      branch: result[4]
+      branch: result[4],
+      author: result[5]
     });
   });
 }
@@ -659,9 +660,23 @@ function getBuildCaption (build, variant, isPrivate) {
     caption += '\n';
     caption += '<b>Commit</b>: <a href="' + build.remoteUrl + '/commit/' + build.commit.long + '">' + build.commit.short + '</a>';
   }
-  if (build.branch != 'main') {
+  if (build.branch !== 'main') {
     caption += '\n';
     caption += '<b>Branch</b>: <code>' + build.branch + '</code>';
+  }
+  if (build.pullRequests) {
+    caption += '\n';
+    caption += '<b>Pull requests</b>: ';
+    let isFirst = true;
+    for (const pullRequestId in build.pullRequests) {
+      if (isFirst) {
+        isFirst = false;
+      } else {
+        caption += ', ';
+      }
+      const pullRequest = build.pullRequests[pullRequestId];
+      caption += '<a href="' + build.remoteUrl + '/pull/' + pullRequestId + '/commits/' + pullRequest.commit.long + '">#' + pullRequestId + ' (' + pullRequest.commit.short + ')</a>'
+    }
   }
   caption += '\n';
   const checksums = ['md5', 'sha1', 'sha256'];
@@ -798,14 +813,11 @@ function uploadToTelegram (bot, task, build, variant, onDone) {
 function traceBuiltApk (build, task, variant, checksum, onDone) {
   for (let algorithm in checksum) {
     const hash = checksum[algorithm];
-    const data = {
-      remoteUrl: build.remoteUrl,
-      branch: build.branch,
-      commit: build.commit,
-      version: build.version,
+    const data = toShotBuildInfo(build);
+    Object.assign(data, {
       variant: variant,
       hashAlgorithm: algorithm
-    };
+    });
     if (build.googlePlayTrack) {
       data.googlePlayTrack = build.googlePlayTrack;
     }
@@ -820,13 +832,21 @@ function findApkByHash (hash, callback) {
   db.get('hash_' + hash, {valueEncoding: 'json'}, callback);
 }
 
-async function tracePublishedTelegramBuild (build) {
-  await storeObject('telegram', {
+function toShotBuildInfo (build) {
+  const buildData = {
     remoteUrl: build.remoteUrl,
     branch: build.branch,
     commit: build.commit,
     version: build.version
-  }, build.telegramTrack);
+  };
+  if (build.pullRequests) {
+    buildData.pullRequests = build.pullRequests;
+  }
+  return buildData;
+}
+
+async function tracePublishedTelegramBuild (build) {
+  await storeObject('telegram', toShotBuildInfo(build), build.telegramTrack);
 }
 
 async function findPublishedTelegramBuild (build) {
@@ -837,12 +857,7 @@ async function findPublishedTelegramBuild (build) {
 }
 
 async function tracePublishedGooglePlayBuild (build) {
-  await storeObject('google_play', {
-    remoteUrl: build.remoteUrl,
-    branch: build.branch,
-    commit: build.commit,
-    version: build.version
-  }, build.googlePlayTrack);
+  await storeObject('google_play', toShotBuildInfo(build), build.googlePlayTrack);
 }
 
 async function findPublishedGooglePlayBuild (build) {
@@ -1207,6 +1222,7 @@ function processPrivateCommand (botId, bot, msg, command, commandArgs) {
         };
         if (pullRequestIds && pullRequestIds.length) {
           build.pullRequestIds = pullRequestIds;
+          build.pullRequests = {};
         }
         if (outputChatId !== build.serviceChatId) {
           build.publicChatId = outputChatId;
@@ -1264,17 +1280,26 @@ function processPrivateCommand (botId, bot, msg, command, commandArgs) {
         const updateSettingsTask = {
           name: 'updateSettings',
           act: (task, callback) => {
-            fs.writeFile(settings.TGX_SOURCE_PATH + '/local.properties',
-              'sdk.dir=' + settings.ANDROID_SDK_ROOT + '\n' +
+            let properties = 'sdk.dir=' + settings.ANDROID_SDK_ROOT + '\n' +
               'keystore.file=' + settings.TGX_KEYSTORE_PATH + '\n' +
               'app.id=' + settings.app.id + '\n' +
               'app.name=' + settings.app.name + '\n' +
               'app.download_url=' + settings.app.download_url + '\n' +
               'app.sources_url=' + settings.app.sources_url + '\n' +
-              (build.pullRequestIds ? 'app.pull_requests=' + build.pullRequestIds.join(',') + '\n' : '') +
               'telegram.api_id=' + settings.telegram.app.api_id + '\n' +
               'telegram.api_hash=' + settings.telegram.app.api_hash + '\n' +
-              'youtube.api_key=' + settings.youtube.api_key + '\n',
+              'youtube.api_key=' + settings.youtube.api_key + '\n';
+            if (build.pullRequestIds) {
+              properties += 'pr.ids=' + build.pullRequestIds.join(',') + '\n';
+              for (const pullRequestId in build.pullRequests) {
+                const pullRequest = build.pullRequests[pullRequestId];
+                properties += 'pr.' + pullRequestId + '.commit_short=' + pullRequest.commit.short + '\n';
+                properties += 'pr.' + pullRequestId + '.commit_long=' + pullRequest.commit.long + '\n';
+                properties += 'pr.' + pullRequestId + '.author=' + pullRequest.author + '\n';
+              }
+            }
+            fs.writeFile(settings.TGX_SOURCE_PATH + '/local.properties',
+              properties,
               'utf-8',
               (err) => {
                 if (err) {
@@ -1306,30 +1331,58 @@ function processPrivateCommand (botId, bot, msg, command, commandArgs) {
             name: 'checkout',
             cmd: 'git clean -xfdf && \
                   git submodule foreach --recursive git clean -xfdf && \
-                  git reset --hard origin/main && \
                   git checkout main && \
-                  git submodule foreach --recursive git reset --hard && git pull && \
+                  git reset --hard origin/main && \
+                  git pull && \
+                  git submodule foreach --recursive git reset --hard && \
                   git submodule update --init --recursive'
           };
           build.tasks.push(LOCAL ? convertToDockerTask(resetTask) : resetTask);
           build.tasks.push(LOCAL ? convertToDockerTask(checkoutTask) : checkoutTask);
           if (build.pullRequestIds) {
+            if (LOCAL)
+              throw Error('Unsupported!');
+
             for (let i = 0; i < build.pullRequestIds.length; i++) {
               const isSecondary = i > 0;
               const pullRequestId = build.pullRequestIds[i];
-              const mergePrTask = {
-                name: 'merge-pr-' + pullRequestId,
+
+              const preparePrTask = {
+                name: 'fetchPr-' + pullRequestId,
                 cmd: '(git branch -D pr-' + pullRequestId + ' || true) && \
                       git fetch origin pull/' + pullRequestId + '/head:pr-' + pullRequestId + ' && \
                       ' + (isSecondary ? 'git stash &&' : '') + ' \
-                      git checkout pr-' + pullRequestId + ' && \
-                      git merge main -m "Sync with main" && \
+                      git checkout pr-' + pullRequestId
+              };
+              build.tasks.push(preparePrTask);
+
+              const updatePrInfoTask = {
+                name: 'refreshPrInfo-' + pullRequestId,
+                act: (task, callback) => {
+                  getGitData((newGitData) => {
+                    if (newGitData) {
+                      build.pullRequests[pullRequestId] = {
+                        commit: newGitData.commit,
+                        author: newGitData.author
+                      };
+                      callback(0);
+                    } else {
+                      callback(1);
+                    }
+                  });
+                }
+              };
+              build.tasks.push(updatePrInfoTask);
+
+              const squashPrTask = {
+                name: 'squashPr-' + pullRequestId,
+                cmd: 'git merge main -m "Sync with main" && \
                       git checkout main && \
                       ' + (isSecondary ? 'git stash pop &&' : '') + ' \
                       git merge pr-' + pullRequestId + ' --squash --autostash && \
                       git branch -D pr-' + pullRequestId
               };
-              build.tasks.push(mergePrTask);
+              build.tasks.push(squashPrTask);
             }
           }
           build.tasks.push(checkGitTask);
