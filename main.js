@@ -283,7 +283,7 @@ function getGitData (callback) {
     if (error) {
       throw error;
     }
-    const result = trimIndent(stdout).trim().split(' ', 5);
+    const result = trimIndent(stdout).trim().split(' ', 6);
     let remoteUrl = result[3];
     if (remoteUrl.startsWith('git@')) {
       let index = remoteUrl.indexOf(':', 4);
