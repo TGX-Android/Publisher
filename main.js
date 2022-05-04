@@ -1193,7 +1193,7 @@ function processPrivateCommand (botId, bot, msg, command, commandArgs) {
         const skipBuild = command === '/update_sdk';
         const outputChatId = isPrivate ? (buildType === 'alpha' ? ALPHA_CHAT_ID : ADMIN_USER_ID) : BETA_CHAT_ID;
         const buildId = nextBuildId();
-        const pullRequestId = ['/checkout', '/checkout_with_docker'].includes(command) && commandArgs ? parseInt(commandArgs) : 0;
+        const pullRequestIds = ['/checkout', '/checkout_with_docker'].includes(command) && commandArgs ? commandArgs.split(/[,\s]+/).map((prId) => parseInt(prId)).filter((prId) => prId > 0).sort() : 0;
         const build = {
           id: buildId,
           type: buildType,
@@ -1205,8 +1205,8 @@ function processPrivateCommand (botId, bot, msg, command, commandArgs) {
           googlePlayTrack: buildType === 'stable' ? 'production' : buildType === 'beta' || buildType === 'alpha' ? buildType : null,
           files: {}
         };
-        if (pullRequestId) {
-          build.pullRequestId = pullRequestId;
+        if (pullRequestIds && pullRequestIds.length) {
+          build.pullRequestIds = pullRequestIds;
         }
         if (outputChatId !== build.serviceChatId) {
           build.publicChatId = outputChatId;
@@ -1270,7 +1270,8 @@ function processPrivateCommand (botId, bot, msg, command, commandArgs) {
               'app.id=' + settings.app.id + '\n' +
               'app.name=' + settings.app.name + '\n' +
               'app.download_url=' + settings.app.download_url + '\n' +
-              'app.sources_url=' + (pullRequestId ? build.remoteUrl + '/pull/' + pullRequestId : settings.app.sources_url) + '\n' +
+              'app.sources_url=' + settings.app.sources_url + '\n' +
+              (build.pullRequestIds ? 'app.pull_requests=' + build.pullRequestIds.join(',') + '\n' : '') +
               'telegram.api_id=' + settings.telegram.app.api_id + '\n' +
               'telegram.api_hash=' + settings.telegram.app.api_hash + '\n' +
               'youtube.api_key=' + settings.youtube.api_key + '\n',
@@ -1302,16 +1303,35 @@ function processPrivateCommand (botId, bot, msg, command, commandArgs) {
             script: 'scripts/force-clean.sh'
           };
           const checkoutTask = {
-            name: (pullRequestId ? 'fetchPullRequest' + pullRequestId : 'checkout'),
+            name: 'checkout',
             cmd: 'git clean -xfdf && \
                   git submodule foreach --recursive git clean -xfdf && \
-                  git reset --hard && \
-                  ' + (pullRequestId ? 'git checkout main && (git branch -D pull-request-' + pullRequestId + ' || true) && git fetch origin pull/' + pullRequestId + '/head:pull-request-' + pullRequestId + ' && git checkout pull-request-' + pullRequestId : 'git checkout ' + (commandArgs ? commandArgs : 'main')) + ' && \
-                  git submodule foreach --recursive git reset --hard' + (pullRequestId ? '' : ' && git pull') + ' && \
+                  git reset --hard origin/main && \
+                  git checkout main && \
+                  git submodule foreach --recursive git reset --hard && git pull && \
                   git submodule update --init --recursive'
           };
           build.tasks.push(LOCAL ? convertToDockerTask(resetTask) : resetTask);
           build.tasks.push(LOCAL ? convertToDockerTask(checkoutTask) : checkoutTask);
+          if (build.pullRequestIds) {
+            for (let i = 0; i < build.pullRequestIds.length; i++) {
+              const isSecondary = i > 0;
+              const pullRequestId = build.pullRequestIds[i];
+              const mergePrTask = {
+                name: 'merge-pr-' + pullRequestId,
+                cmd: '(git branch -D pr-' + pullRequestId + ' || true) && \
+                      git fetch origin pull/' + pullRequestId + '/head:pr-' + pullRequestId + ' && \
+                      ' + (isSecondary ? 'git stash &&' : '') + ' \
+                      git checkout pr-' + pullRequestId + ' && \
+                      git merge main -m "Sync with main" && \
+                      git checkout main && \
+                      ' + (isSecondary ? 'git stash pop &&' : '') + ' \
+                      git merge pr-' + pullRequestId + ' --squash --autostash && \
+                      git branch -D pr-' + pullRequestId
+              };
+              build.tasks.push(mergePrTask);
+            }
+          }
           build.tasks.push(checkGitTask);
           build.tasks.push(updateSettingsTask);
 
