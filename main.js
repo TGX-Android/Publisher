@@ -1070,9 +1070,9 @@ function sendArray (bot, chatId, array, parseMode, delimiter) {
 function toDisplayPullRequestList (build) {
   if (build.pullRequestIds) {
     return build.pullRequestIds.map((pullRequestId) => {
-      const pullRequest = build.pullRequests[pullRequestId];
+      const pullRequest = build.pullRequests ? build.pullRequests[pullRequestId] : null;
       if (pullRequest) {
-        return '<a href="' + build.remoteUrl + '/pull/' + pullRequestId + '/commits/' + pullRequest.commit.long + '">' + pullRequestId + '</a> <code>' + pullRequest.commit.short + '</code>';
+        return '<code>' + pullRequestId + '</code>' + ' <a href="' + build.remoteUrl + '/pull/' + pullRequestId + '/commits/' + pullRequest.commit.long + '">' + pullRequest.commit.short + '</a>';
       } else {
         return '<code>' + pullRequestId + '</code>';
       }
@@ -1081,13 +1081,19 @@ function toDisplayPullRequestList (build) {
     let result = '';
     let first = true;
     for (const pullRequestId in build.pullRequests) {
-      if (first) {
-        first = false;
-      } else {
-        result += ', ';
+      if (build.pullRequests.hasOwnProperty(pullRequestId)) {
+        const pullRequest = build.pullRequests[pullRequestId];
+        if (pullRequest) {
+          if (first) {
+            first = false;
+          } else {
+            result += ', ';
+          }
+          result += '<code>' + pullRequestId + '</code>' + ' <a href="' + build.remoteUrl + '/pull/' + pullRequestId + '/commits/' + pullRequest.commit.long + '">' + pullRequest.commit.short + '</a>'
+        } else {
+          result += '<code>' + pullRequestId + '</code>';
+        }
       }
-      const pullRequest = build.pullRequests[pullRequestId];
-      result += '<a href="' + build.remoteUrl + '/pull/' + pullRequestId + '/commits/' + pullRequest.commit.long + '">' + pullRequestId + '</a> <code>' + pullRequest.commit.short + '</code>';
     }
   } else {
     return '';
@@ -1433,6 +1439,39 @@ function processPrivateCommand (botId, bot, msg, command, commandArgs) {
           }
         }
         if (!command.startsWith('/checkout') && command !== '/update_sdk') {
+          const restorePullRequestsListTask = {
+            name: 'restorePullRequestsList',
+            act: (task, callback) => {
+              fs.readFile(settings.TGX_SOURCE_PATH + '/local.properties', 'utf-8',  (err, data) => {
+                if (err) {
+                  callback(1);
+                  return;
+                }
+                let prIds = getProperty(data, 'pr.ids');
+                if (prIds) {
+                  prIds = prIds.split(',').map((id) => parseInt(id)).filter((id) => id > 0).sort();
+                }
+                if (!prIds || !prIds.length) {
+                  callback(0);
+                  return;
+                }
+                build.pullRequestIds = prIds;
+                build.pullRequests = {};
+                for (let i = 0; i < prIds.length; i++) {
+                  const pullRequestId = prIds[i];
+                  build.pullRequests[pullRequestId] = {
+                    commit: {
+                      short: getProperty(data, 'pr.' + pullRequestId + '.commit_short'),
+                      long: getProperty(data, 'pr.' + pullRequestId + '.commit_long'),
+                    },
+                    author: getProperty(data, 'pr.' + pullRequestId + '.author')
+                  }
+                }
+                callback(0);
+              });
+            }
+          };
+          build.tasks.push(restorePullRequestsListTask);
           build.variants.forEach((originalVariant) => {
             const variant = ucfirst(originalVariant);
             if (!skipBuild) {
