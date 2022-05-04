@@ -209,6 +209,17 @@ function ucfirst (str) {
   return str && str.length ? str.charAt(0).toUpperCase() + str.substring(1) : str;
 }
 
+function empty (obj) {
+  if (typeof obj === 'object') {
+    for (const key in obj) {
+      if (obj.hasOwnProperty(key)) {
+        return false;
+      }
+    }
+  }
+  return true;
+}
+
 async function getObject (type, id) {
   if (!cur.cache[type]) {
     cur.cache[type] = {};
@@ -664,7 +675,7 @@ function getBuildCaption (build, variant, isPrivate) {
     caption += '\n';
     caption += '<b>Branch</b>: <code>' + build.branch + '</code>';
   }
-  if (build.pullRequests) {
+  if (!empty(build.pullRequests)) {
     caption += '\n';
     caption += '<b>Pull requests</b>: ';
     let isFirst = true;
@@ -842,7 +853,7 @@ function toShotBuildInfo (build) {
     commit: build.commit,
     version: build.version
   };
-  if (build.pullRequests) {
+  if (!empty(build.pullRequests)) {
     buildData.pullRequests = build.pullRequests;
   }
   return buildData;
@@ -1292,7 +1303,7 @@ function processPrivateCommand (botId, bot, msg, command, commandArgs) {
               'telegram.api_id=' + settings.telegram.app.api_id + '\n' +
               'telegram.api_hash=' + settings.telegram.app.api_hash + '\n' +
               'youtube.api_key=' + settings.youtube.api_key + '\n';
-            if (build.pullRequestIds) {
+            if (!empty(build.pullRequests)) {
               properties += 'pr.ids=' + build.pullRequestIds.join(',') + '\n';
               for (const pullRequestId in build.pullRequests) {
                 const pullRequest = build.pullRequests[pullRequestId];
@@ -1940,10 +1951,24 @@ function getChecksumMessage (checksum, apk, displayChecksum) {
   }
 
   text += 'corresponds to ';
+  text += '<b>' + (!apk.branch || apk.branch === 'main' ? 'official' : 'unofficial') + ' Telegram X</b> build.';
 
-  if (!apk.branch || apk.branch === 'main') {
-    text += '<b>official Telegram X</b> build.';
-  } else if (apk.branch.startsWith('pull-request-')) {
+  if (!empty(apk.pullRequests)) {
+    text += '\n\n';
+    text += 'It includes the following <b>pull requests</b>: '
+    let first = true;
+    for (const pullRequestId in apk.pullRequests) {
+      if (first) {
+        first = false;
+      } else {
+        text += ', ';
+      }
+      const pullRequest = apk.pullRequests[pullRequestId];
+      text += '<a href="' + apk.remoteUrl + '/pull/' + pullRequestId + '/commits/' + pullRequest.commit.long + '>#' + pullRequest.commit.short + '</a>';
+    }
+  }
+
+  if (apk.branch.startsWith('pull-request-')) {
     const prId = apk.branch.substring('pull-request-'.length);
     text += '<b>pull request #' + prId + '</b> build.\n\n';
     text += 'It is <b>not official</b>, but you can check the <a href="' + apk.remoteUrl + '/pull/' + prId + '">source code</a>.';
