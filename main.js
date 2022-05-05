@@ -1072,7 +1072,7 @@ function toDisplayPullRequestList (build) {
     return build.pullRequestIds.map((pullRequestId) => {
       const pullRequest = build.pullRequests ? build.pullRequests[pullRequestId] : null;
       if (pullRequest) {
-        return '<code>' + pullRequestId + '</code>' + ' <a href="' + build.remoteUrl + '/pull/' + pullRequestId + '/commits/' + pullRequest.commit.long + '">' + pullRequest.commit.short + '</a>';
+        return '<code>' + pullRequestId + '</code> / <a href="' + build.remoteUrl + '/pull/' + pullRequestId + '/commits/' + pullRequest.commit.long + '">' + pullRequest.commit.short + '</a>';
       } else {
         return '<code>' + pullRequestId + '</code>';
       }
@@ -1089,12 +1089,13 @@ function toDisplayPullRequestList (build) {
           } else {
             result += ', ';
           }
-          result += '<code>' + pullRequestId + '</code>' + ' <a href="' + build.remoteUrl + '/pull/' + pullRequestId + '/commits/' + pullRequest.commit.long + '">' + pullRequest.commit.short + '</a>'
+          result += '<code>' + pullRequestId + '</code> / <a href="' + build.remoteUrl + '/pull/' + pullRequestId + '/commits/' + pullRequest.commit.long + '">' + pullRequest.commit.short + '</a>'
         } else {
           result += '<code>' + pullRequestId + '</code>';
         }
       }
     }
+    return result;
   } else {
     return '';
   }
