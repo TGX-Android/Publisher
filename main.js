@@ -1587,6 +1587,9 @@ function processPrivateCommand (botId, bot, msg, command, commandArgs) {
             } else {
               result += '\n<b>Commit</b>: ' + commitUrl;
             }
+            if (build.pullRequestIds || !empty(build.pullRequests)) {
+              result += '\n<b>Pull requests</b>: ' + toDisplayPullRequestList(build);
+            }
 
             if (commandArgs && build.endTime && !build.error && !build.aborted) {
               result += '\n\n' + commandArgs.trim();
