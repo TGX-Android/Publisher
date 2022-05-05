@@ -1071,10 +1071,11 @@ function toDisplayPullRequestList (build) {
   if (build.pullRequestIds) {
     return build.pullRequestIds.map((pullRequestId) => {
       const pullRequest = build.pullRequests ? build.pullRequests[pullRequestId] : null;
+      const pullRequestUrl = build.remoteUrl + '/pull/' + pullRequestId;
       if (pullRequest) {
-        return '<code>' + pullRequestId + '</code> / <a href="' + build.remoteUrl + '/pull/' + pullRequestId + '/commits/' + pullRequest.commit.long + '">' + pullRequest.commit.short + '</a>';
+        return '<a href="' + pullRequestUrl + '"><b>' + pullRequestId + '</b></a> / <a href="' + pullRequestUrl + '/commits/' + pullRequest.commit.long + '">' + pullRequest.commit.short + '</a>';
       } else {
-        return '<code>' + pullRequestId + '</code>';
+        return '<a href="' + pullRequestUrl + '"><b>' + pullRequestId + '</b></a>';
       }
     }).join(', ');
   } else if (build.pullRequests) {
@@ -1083,15 +1084,16 @@ function toDisplayPullRequestList (build) {
     for (const pullRequestId in build.pullRequests) {
       if (build.pullRequests.hasOwnProperty(pullRequestId)) {
         const pullRequest = build.pullRequests[pullRequestId];
+        const pullRequestUrl = build.remoteUrl + '/pull/' + pullRequestId;
         if (pullRequest) {
           if (first) {
             first = false;
           } else {
             result += ', ';
           }
-          result += '<code>' + pullRequestId + '</code> / <a href="' + build.remoteUrl + '/pull/' + pullRequestId + '/commits/' + pullRequest.commit.long + '">' + pullRequest.commit.short + '</a>'
+          result += '<a href="' + pullRequestUrl + '"><b>' + pullRequestId + '</b></a> / <a href="' + pullRequestUrl + '/commits/' + pullRequest.commit.long + '">' + pullRequest.commit.short + '</a>';
         } else {
-          result += '<code>' + pullRequestId + '</code>';
+          result += '<a href="' + pullRequestUrl + '"><b>' + pullRequestId + '</b></a>';
         }
       }
     }
