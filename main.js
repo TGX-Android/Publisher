@@ -1296,7 +1296,7 @@ function processPrivateCommand (botId, bot, msg, command, commandArgs) {
             '--max-workers=' + threadCount
           ]
         };
-        const checkGitTask = {
+        const refreshInfoTask = {
           name: 'refreshInfo',
           act: (task, callback) => {
             getGitData((newGitData) => {
@@ -1437,7 +1437,7 @@ function processPrivateCommand (botId, bot, msg, command, commandArgs) {
               build.tasks.push(squashPrTask);
             }
           }
-          build.tasks.push(checkGitTask);
+          build.tasks.push(refreshInfoTask);
           build.tasks.push(updateSettingsTask);
 
           if (LOCAL) {
@@ -1458,6 +1458,8 @@ function processPrivateCommand (botId, bot, msg, command, commandArgs) {
             build.tasks.push(initTask);
             build.tasks.push(buildDependenciesTask);
           }
+        } else {
+          build.tasks.push(refreshInfoTask);
         }
         if (!command.startsWith('/checkout') && command !== '/update_sdk') {
           const restorePullRequestsListTask = {
