@@ -1238,11 +1238,18 @@ function processPrivateCommand (botId, bot, msg, command, commandArgs) {
           specificVariant = null;
         }
 
+        const commandArgsList = commandArgs ? commandArgs.split(/[,\s]+/) : [];
+
         const isPrivate = !(['/deploy_beta', '/deploy_stable'].includes(command));
         const skipBuild = command === '/update_sdk';
         const outputChatId = isPrivate ? (buildType === 'alpha' ? ALPHA_CHAT_ID : ADMIN_USER_ID) : BETA_CHAT_ID;
         const buildId = nextBuildId();
-        const pullRequestIds = ['/checkout', '/checkout_with_docker'].includes(command) && commandArgs ? commandArgs.split(/[,\s]+/).map((prId) => parseInt(prId)).filter((prId) => prId > 0).sort() : 0;
+        const pullRequestIds = !['/checkout', '/checkout_with_docker'].includes(command) ? null : commandArgsList.filter((arg) =>
+          arg.match(/^[0-9]+$/gi)
+        ).map((prId) =>
+          parseInt(prId)
+        ).filter((prId) => prId > 0)
+         .sort();
         const build = {
           id: buildId,
           type: buildType,
@@ -1297,10 +1304,21 @@ function processPrivateCommand (botId, bot, msg, command, commandArgs) {
                 build.commit = newGitData.commit;
                 build.remoteUrl = newGitData.remoteUrl;
                 build.branch = newGitData.branch;
-                getAppVersion((newVersion) => {
+                getAppVersion(async (newVersion) => {
                   if (newVersion) {
                     build.version = newVersion;
-                    callback(0);
+                    const previousGooglePlayBuild = await findPublishedGooglePlayBuild(build);
+                    const previousTelegramBuild = await findPublishedTelegramBuild(build);
+                    if (
+                      (previousGooglePlayBuild && previousGooglePlayBuild.version.code >= build.version.code) ||
+                      (previousTelegramBuild && previousTelegramBuild.version.code >= build.version.code)
+                    ) {
+                      callback(1);
+                    } else {
+                      build.previousTelegramBuild = previousTelegramBuild;
+                      build.previousGooglePlayBuild = previousGooglePlayBuild;
+                      callback(0);
+                    }
                   } else {
                     callback(1);
                   }
@@ -1919,54 +1937,32 @@ function processPrivateCommand (botId, bot, msg, command, commandArgs) {
 
           return true;
         };
-        findPublishedGooglePlayBuild(build).then((previousGooglePlayBuild) => {
-          build.previousGooglePlayBuild = previousGooglePlayBuild;
-          if (previousGooglePlayBuild && previousGooglePlayBuild.version.code >= build.version.code) {
-            bot.sendMessage(msg.chat.id,
-              '<code>' + command + '</code> <b>failed</b> due to required version bump.\n\n' +
-              '<b>Current version</b>: ' + build.version.name + '\n' +
-              '<b>Google Play' + (build.googlePlayTrack === 'production' ? '' : ' ' + ucfirst(build.googlePlayTrack)) + '</b>: <code>' + previousGooglePlayBuild.version.name + '</code>'
-            ).catch(onGlobalError);
-            return;
+        estimateBuildDuration(build).then(() => {
+          build.step();
+
+          build.message = build.asString();
+          build.canBeCanceled = true;
+
+          bot.sendMessage(msg.chat.id, build.message, {
+            parse_mode: 'HTML',
+            reply_markup: replyMarkup,
+            disable_web_page_preview: true
+          }).then((message) => {
+            build.serviceMessageId = message.message_id;
+            build.updateMessage();
+          }).catch(onGlobalError);
+
+          if (build.publicChatId) {
+            build.publicMessage = build.asString(true);
+            bot.sendMessage(build.publicChatId, build.publicMessage, {
+              parse_mode: 'HTML',
+              disable_notification: true,
+              disable_web_page_preview: true
+            }).then((message) => {
+              build.publicMessageId = message.message_id;
+              build.updateMessage();
+            }).catch(onGlobalError);
           }
-          findPublishedTelegramBuild(build).then((previousTelegramBuild) => {
-            build.previousTelegramBuild = previousTelegramBuild;
-            if (previousTelegramBuild && previousTelegramBuild.version.code >= build.version.code) {
-              bot.sendMessage(msg.chat.id,
-                '<code>' + command + '</code> <b>failed</b> due to required version bump.\n\n' +
-                '<b>Current version</b>: ' + build.version.name + '\n' +
-                '<b>Telegram' + (build.telegramTrack.startsWith('private') ? ' (private)' : ' ' + ucfirst(build.telegramTrack)) + '</b>: <code>' + previousTelegramBuild.version.name + '</code>'
-              ).catch(onGlobalError);
-              return;
-            }
-            estimateBuildDuration(build).then(() => {
-              build.step();
-
-              build.message = build.asString();
-              build.canBeCanceled = true;
-
-              bot.sendMessage(msg.chat.id, build.message, {
-                parse_mode: 'HTML',
-                reply_markup: replyMarkup,
-                disable_web_page_preview: true
-              }).then((message) => {
-                build.serviceMessageId = message.message_id;
-                build.updateMessage();
-              }).catch(onGlobalError);
-
-              if (build.publicChatId) {
-                build.publicMessage = build.asString(true);
-                bot.sendMessage(build.publicChatId, build.publicMessage, {
-                  parse_mode: 'HTML',
-                  disable_notification: true,
-                  disable_web_page_preview: true
-                }).then((message) => {
-                  build.publicMessageId = message.message_id;
-                  build.updateMessage();
-                }).catch(onGlobalError);
-              }
-            });
-          });
         });
       }); });
       break;
