@@ -1313,6 +1313,13 @@ function processPrivateCommand (botId, bot, msg, command, commandArgs) {
                       (previousGooglePlayBuild && previousGooglePlayBuild.version.code >= build.version.code) ||
                       (previousTelegramBuild && previousTelegramBuild.version.code >= build.version.code)
                     ) {
+                      task.logPrivately(
+                        'Version bump required. Current: ' + build.version.code +
+                        ', previous: ' + Math.max(
+                          previousGooglePlayBuild ? previousGooglePlayBuild.version.code : 0,
+                          previousTelegramBuild ? previousTelegramBuild.version.code : 0
+                        )
+                      );
                       callback(1);
                     } else {
                       build.previousTelegramBuild = previousTelegramBuild;
