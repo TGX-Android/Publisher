@@ -667,7 +667,7 @@ function getBuildCaption (build, variant, isPrivate) {
     caption += '<b>Changes</b>: <a href="' + build.remoteUrl + '/compare/' + fromToCommit + '">' + fromToCommit + '</a>';
   } else {
     caption += '\n';
-    caption += '<b>Commit</b>: <a href="' + build.remoteUrl + '/commit/' + build.commit.long + '">' + build.commit.short + '</a>';
+    caption += '<b>Commit</b>: <a href="' + build.remoteUrl + '/tree/' + build.commit.long + '">' + build.commit.short + '</a>';
   }
   if (build.pullRequestIds || !empty(build.pullRequests)) {
     caption += '\n';
@@ -1160,7 +1160,7 @@ function processPrivateCommand (botId, bot, msg, command, commandArgs) {
       getGitData((gitData) => {
         getAppVersion((version) => {
           let text = '<b>App Version</b>: <code>' + version.name + '</code>\n';
-          text += '<b>Commit</b>: <a href="' + gitData.remoteUrl + '/commit/' + gitData.commit.long + '">' + gitData.commit.short + '</a>';
+          text += '<b>Commit</b>: <a href="' + gitData.remoteUrl + '/tree/' + gitData.commit.long + '">' + gitData.commit.short + '</a>';
           if (gitData.branch) {
             text += '\n<b>Branch</b>: <code>' + gitData.branch + '</code>';
           }
@@ -1587,7 +1587,7 @@ function processPrivateCommand (botId, bot, msg, command, commandArgs) {
         
         const replyMarkup = JSON.stringify({inline_keyboard: [[{text: 'Cancel', callback_data: 'abort' + buildId}]]});
         build.asString = (isPublic, shorten) => {
-          const commitUrl = '<a href="' + build.remoteUrl + '/commit/' + build.commit.long + '">' + build.commit.short + '</a>';
+          const commitUrl = '<a href="' + build.remoteUrl + '/tree/' + build.commit.long + '">' + build.commit.short + '</a>';
           const fromToCommit = getFromToCommit(build);
           const changesUrl = fromToCommit ? '<a href="' + build.remoteUrl + '/compare/' + fromToCommit + '">' + fromToCommit + '</a>' : null;
           let result = null;
@@ -2021,7 +2021,7 @@ function getChecksumMessage (checksum, apk, displayChecksum) {
 
   text += '\n\n';
   text += '<b>Version</b>: <code>' + apk.version.name + '-' + getDisplayVariant(apk.variant) + '</code>\n';
-  text += '<b>Commit</b>: <a href="' + apk.remoteUrl + '/commit/' + apk.commit.long + '">' + apk.commit.short + '</a>';
+  text += '<b>Commit</b>: <a href="' + apk.remoteUrl + '/tree/' + apk.commit.long + '">' + apk.commit.short + '</a>';
   if (apk.pullRequestIds || !empty(apk.pullRequests)) {
     text += '\n';
     text += '<b>Pull requests</b>: ' + toDisplayPullRequestList(apk);
