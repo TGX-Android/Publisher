@@ -1619,7 +1619,9 @@ function processPrivateCommand (botId, bot, msg, command, commandArgs) {
                 month: 'numeric',
                 year: 'numeric',
                 hour: 'numeric',
-                minute: '2-digit'
+                minute: '2-digit',
+                timeZoneName: 'short',
+                timeZone: 'UTC'
               });
             }
             if (build.pullRequestIds || !empty(build.pullRequests)) {
@@ -2009,7 +2011,9 @@ function getChecksumMessage (checksum, apk, displayChecksum) {
       month: 'numeric',
       year: 'numeric',
       hour: 'numeric',
-      minute: '2-digit'
+      minute: '2-digit',
+      timeZoneName: 'short',
+      timeZone: 'UTC'
     });
   }
   if (apk.pullRequestIds || !empty(apk.pullRequests)) {
