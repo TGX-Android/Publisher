@@ -1613,6 +1613,15 @@ function processPrivateCommand (botId, bot, msg, command, commandArgs) {
             } else {
               result += '\n<b>Commit</b>: ' + commitUrl;
             }
+            if (build.git.date) {
+              result += ', ' + new Date(build.git.date * 1000).toLocaleString('en-GB', {
+                day: 'numeric',
+                month: 'numeric',
+                year: 'numeric',
+                hour: 'numeric',
+                minute: '2-digit'
+              });
+            }
             if (build.pullRequestIds || !empty(build.pullRequests)) {
               result += '\n<b>Pull requests</b>: ' + toDisplayPullRequestList(build);
             }
@@ -1994,6 +2003,15 @@ function getChecksumMessage (checksum, apk, displayChecksum) {
   text += '\n\n';
   text += '<b>Version</b>: <code>' + apk.version.name + '-' + getDisplayVariant(apk.variant) + '</code>\n';
   text += '<b>Commit</b>: <a href="' + apk.remoteUrl + '/tree/' + apk.commit.long + '">' + apk.commit.short + '</a>';
+  if (apk.date) {
+    text += ', ' + new Date(apk.date * 1000).toLocaleString('en-GB', {
+      day: 'numeric',
+      month: 'numeric',
+      year: 'numeric',
+      hour: 'numeric',
+      minute: '2-digit'
+    });
+  }
   if (apk.pullRequestIds || !empty(apk.pullRequests)) {
     text += '\n';
     text += '<b>Pull requests</b>: ' + toDisplayPullRequestList(apk);
