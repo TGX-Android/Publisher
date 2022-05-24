@@ -309,7 +309,8 @@ function getGitData (callback) {
       },
       remoteUrl: remoteUrl,
       branch: result[4],
-      author: result[5]
+      author: result[5],
+      date: parseInt(result[2])
     });
   });
 }
@@ -563,15 +564,6 @@ function getDisplayVariant (variant) {
   }
 }
 
-function convertToDockerTask (task) {
-  const args = task.cmd ? ['-c', '"' + task.cmd + (task.args ? ' ' + task.args.join(' ') : '') + '"'] : task.args ? [task.script, ...task.args] : [task.script];
-  return {
-    name: 'docker' + task.name.substring(0, 1).toUpperCase() + task.name.substring(1),
-    script: 'scripts/run-docker.sh',
-    args: args
-  };
-}
-
 function getBuildFiles (build, variant, callback) {
   const architecture = getDisplayVariant(variant); // == 'universal' ? null : getDisplayVariant(variant);
   
@@ -647,13 +639,13 @@ function getBuildFiles (build, variant, callback) {
 function getFromToCommit (build) {
   if (build.googlePlayTrack) {
     if (build.previousGooglePlayBuild &&
-        build.previousGooglePlayBuild.remoteUrl === build.remoteUrl) {
-      return build.previousGooglePlayBuild.commit.short + '...' + build.commit.short;
+        build.previousGooglePlayBuild.remoteUrl === build.git.remoteUrl) {
+      return build.previousGooglePlayBuild.commit.short + '...' + build.git.commit.short;
     }
   } else if (build.telegramTrack) {
     if (build.previousTelegramBuild &&
-        build.previousTelegramBuild.remoteUrl === build.remoteUrl) {
-      return build.previousTelegramBuild.commit.short + '...' + build.commit.short;
+        build.previousTelegramBuild.remoteUrl === build.git.remoteUrl) {
+      return build.previousTelegramBuild.commit.short + '...' + build.git.commit.short;
     }
   }
   return null;
@@ -662,12 +654,12 @@ function getFromToCommit (build) {
 function getBuildCaption (build, variant, isPrivate) {
   let caption = '<b>Version</b>: <code>' + build.version.name + '-' + getDisplayVariant(variant) + '</code>';
   if (build.previousTelegramBuild) {
-    const fromToCommit = build.previousTelegramBuild.commit.short + '...' + build.commit.short;
+    const fromToCommit = build.previousTelegramBuild.commit.short + '...' + build.git.commit.short;
     caption += '\n';
-    caption += '<b>Changes</b>: <a href="' + build.remoteUrl + '/compare/' + fromToCommit + '">' + fromToCommit + '</a>';
+    caption += '<b>Changes</b>: <a href="' + build.git.remoteUrl + '/compare/' + fromToCommit + '">' + fromToCommit + '</a>';
   } else {
     caption += '\n';
-    caption += '<b>Commit</b>: <a href="' + build.remoteUrl + '/tree/' + build.commit.long + '">' + build.commit.short + '</a>';
+    caption += '<b>Commit</b>: <a href="' + build.git.remoteUrl + '/tree/' + build.git.commit.long + '">' + build.git.commit.short + '</a>';
   }
   if (build.pullRequestIds || !empty(build.pullRequests)) {
     caption += '\n';
@@ -832,11 +824,9 @@ function findApkByHash (hash, callback) {
 
 function toShotBuildInfo (build) {
   const buildData = {
-    remoteUrl: build.remoteUrl,
-    branch: build.branch,
-    commit: build.commit,
     version: build.version
   };
+  Object.assign(buildData, build.git);
   if (!empty(build.pullRequests)) {
     buildData.pullRequests = build.pullRequests;
   }
@@ -1071,7 +1061,7 @@ function toDisplayPullRequestList (build) {
   if (build.pullRequestIds) {
     return build.pullRequestIds.map((pullRequestId) => {
       const pullRequest = build.pullRequests ? build.pullRequests[pullRequestId] : null;
-      const pullRequestUrl = build.remoteUrl + '/pull/' + pullRequestId;
+      const pullRequestUrl = build.git.remoteUrl + '/pull/' + pullRequestId;
       if (pullRequest) {
         return '<a href="' + pullRequestUrl + '"><b>' + pullRequestId + '</b></a> / <a href="' + pullRequestUrl + '/commits/' + pullRequest.commit.long + '">' + pullRequest.commit.short + '</a>';
       } else {
@@ -1084,7 +1074,7 @@ function toDisplayPullRequestList (build) {
     for (const pullRequestId in build.pullRequests) {
       if (build.pullRequests.hasOwnProperty(pullRequestId)) {
         const pullRequest = build.pullRequests[pullRequestId];
-        const pullRequestUrl = build.remoteUrl + '/pull/' + pullRequestId;
+        const pullRequestUrl = build.git.remoteUrl + '/pull/' + pullRequestId;
         if (pullRequest) {
           if (first) {
             first = false;
@@ -1205,7 +1195,6 @@ function processPrivateCommand (botId, bot, msg, command, commandArgs) {
     case '/build_universal':
 
     case '/checkout':
-    case '/checkout_with_docker':
 
     case '/update_sdk': {
       if (cur.build_no === -1 || cur.uploaded_version === -1) {
@@ -1244,7 +1233,7 @@ function processPrivateCommand (botId, bot, msg, command, commandArgs) {
         const skipBuild = command === '/update_sdk';
         const outputChatId = isPrivate ? (buildType === 'alpha' ? ALPHA_CHAT_ID : ADMIN_USER_ID) : BETA_CHAT_ID;
         const buildId = nextBuildId();
-        const pullRequestIds = !['/checkout', '/checkout_with_docker'].includes(command) ? null : commandArgsList.filter((arg) =>
+        const pullRequestIds = !['/checkout'].includes(command) ? null : commandArgsList.filter((arg) =>
           arg.match(/^[0-9]+$/gi)
         ).map((prId) =>
           parseInt(prId)
@@ -1254,9 +1243,7 @@ function processPrivateCommand (botId, bot, msg, command, commandArgs) {
           id: buildId,
           type: buildType,
           version: _version,
-          commit: _gitData.commit,
-          remoteUrl: _gitData.remoteUrl,
-          branch: _gitData.branch,
+          git: _gitData,
           serviceChatId: msg.chat.id,
           googlePlayTrack: buildType === 'stable' ? 'production' : buildType === 'beta' || buildType === 'alpha' ? buildType : null,
           files: {}
@@ -1275,9 +1262,9 @@ function processPrivateCommand (botId, bot, msg, command, commandArgs) {
           build.telegramTrack = 'private' + build.publicChatId;
         }
 
-        if (build.branch !== 'main' && (build.googlePlayTrack || build.telegramTrack)) {
+        if (build.git.branch !== 'main' && (build.googlePlayTrack || build.telegramTrack)) {
           bot.sendMessage(msg.chat.id,
-            'You are currently on a <b>' + build.branch + '</b> branch. Only <b>main</b> branch can be published.'
+            'You are currently on a <b>' + build.git.branch + '</b> branch. Only <b>main</b> branch can be published.'
           );
           return;
         }
@@ -1301,9 +1288,7 @@ function processPrivateCommand (botId, bot, msg, command, commandArgs) {
           act: (task, callback) => {
             getGitData((newGitData) => {
               if (newGitData) {
-                build.commit = newGitData.commit;
-                build.remoteUrl = newGitData.remoteUrl;
-                build.branch = newGitData.branch;
+                build.git = newGitData;
                 getAppVersion(async (newVersion) => {
                   if (newVersion) {
                     build.version = newVersion;
@@ -1355,6 +1340,9 @@ function processPrivateCommand (botId, bot, msg, command, commandArgs) {
                 properties += 'pr.' + pullRequestId + '.commit_short=' + pullRequest.commit.short + '\n';
                 properties += 'pr.' + pullRequestId + '.commit_long=' + pullRequest.commit.long + '\n';
                 properties += 'pr.' + pullRequestId + '.author=' + pullRequest.author + '\n';
+                if (pullRequest.date) {
+                  properties += 'pr.' + pullRequestId + '.date=' + pullRequest.date + '\n';
+                }
               }
             }
             fs.writeFile(settings.TGX_SOURCE_PATH + '/local.properties',
@@ -1379,8 +1367,7 @@ function processPrivateCommand (botId, bot, msg, command, commandArgs) {
             '--skip-sdk-setup'
           ]
         };
-        if (command === '/checkout' ||
-            command === '/checkout_with_docker') {
+        if (command === '/checkout') {
           const resetTask = {
             name: 'reset',
             silence: true,
@@ -1396,8 +1383,8 @@ function processPrivateCommand (botId, bot, msg, command, commandArgs) {
                   git submodule foreach --recursive git reset --hard && \
                   git submodule update --init --recursive'
           };
-          build.tasks.push(LOCAL ? convertToDockerTask(resetTask) : resetTask);
-          build.tasks.push(LOCAL ? convertToDockerTask(checkoutTask) : checkoutTask);
+          build.tasks.push(resetTask);
+          build.tasks.push(checkoutTask);
           if (build.pullRequestIds) {
             if (LOCAL)
               throw Error('Unsupported!');
@@ -1422,7 +1409,8 @@ function processPrivateCommand (botId, bot, msg, command, commandArgs) {
                     if (newGitData) {
                       build.pullRequests[pullRequestId] = {
                         commit: newGitData.commit,
-                        author: newGitData.author
+                        author: newGitData.author,
+                        date: newGitData.date
                       };
                       callback(0);
                     } else {
@@ -1446,25 +1434,8 @@ function processPrivateCommand (botId, bot, msg, command, commandArgs) {
           }
           build.tasks.push(refreshInfoTask);
           build.tasks.push(updateSettingsTask);
-
-          if (LOCAL) {
-            if (command === '/checkout_with_docker') {
-              build.tasks.push({
-                name: 'buildDocker',
-                silence: true,
-                cmd: 'docker',
-                args: [
-                  'build', '-t', 'tgx-android', '.'
-                ]
-              });
-            }
-            [initTask, buildDependenciesTask].forEach((task) => {
-              build.tasks.push(convertToDockerTask(task));
-            });
-          } else {
-            build.tasks.push(initTask);
-            build.tasks.push(buildDependenciesTask);
-          }
+          build.tasks.push(initTask);
+          build.tasks.push(buildDependenciesTask);
         } else {
           build.tasks.push(refreshInfoTask);
         }
@@ -1494,7 +1465,8 @@ function processPrivateCommand (botId, bot, msg, command, commandArgs) {
                       short: getProperty(data, 'pr.' + pullRequestId + '.commit_short'),
                       long: getProperty(data, 'pr.' + pullRequestId + '.commit_long'),
                     },
-                    author: getProperty(data, 'pr.' + pullRequestId + '.author')
+                    author: getProperty(data, 'pr.' + pullRequestId + '.author'),
+                    date: getProperty(data, 'pr.' + pullRequestId + '.date')
                   }
                 }
                 callback(0);
@@ -1517,7 +1489,7 @@ function processPrivateCommand (botId, bot, msg, command, commandArgs) {
                   '--max-workers=' + threadCount
                 ]
               };
-              build.tasks.push(LOCAL ? convertToDockerTask(buildTask) : buildTask);
+              build.tasks.push(buildTask);
             }
             build.tasks.push({
               name: 'verify' + variant,
@@ -1587,9 +1559,9 @@ function processPrivateCommand (botId, bot, msg, command, commandArgs) {
         
         const replyMarkup = JSON.stringify({inline_keyboard: [[{text: 'Cancel', callback_data: 'abort' + buildId}]]});
         build.asString = (isPublic, shorten) => {
-          const commitUrl = '<a href="' + build.remoteUrl + '/tree/' + build.commit.long + '">' + build.commit.short + '</a>';
+          const commitUrl = '<a href="' + build.git.remoteUrl + '/tree/' + build.git.commit.long + '">' + build.git.commit.short + '</a>';
           const fromToCommit = getFromToCommit(build);
-          const changesUrl = fromToCommit ? '<a href="' + build.remoteUrl + '/compare/' + fromToCommit + '">' + fromToCommit + '</a>' : null;
+          const changesUrl = fromToCommit ? '<a href="' + build.git.remoteUrl + '/compare/' + fromToCommit + '">' + fromToCommit + '</a>' : null;
           let result = null;
           if (isPublic) {
             const displayTrack = build.googlePlayTrack === 'production' ? 'stable' : build.googlePlayTrack ? build.googlePlayTrack : build.telegramTrack ? build.telegramTrack : null;
