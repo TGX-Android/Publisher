@@ -653,17 +653,16 @@ function getFromToCommit (build) {
 
 function getBuildCaption (build, variant, isPrivate) {
   let caption = '<b>Version</b>: <code>' + build.version.name + '-' + getDisplayVariant(variant) + '</code>';
+  caption += '\n<b>Commit</b>: <a href="' + build.git.remoteUrl + '/tree/' + build.git.commit.long + '">' + build.git.commit.short + '</a>';
+  if (build.git.date) {
+    caption += ', ' + toDisplayDate(build.git.date);
+  }
   if (build.previousTelegramBuild) {
     const fromToCommit = build.previousTelegramBuild.commit.short + '...' + build.git.commit.short;
-    caption += '\n';
-    caption += '<b>Changes</b>: <a href="' + build.git.remoteUrl + '/compare/' + fromToCommit + '">' + fromToCommit + '</a>';
-  } else {
-    caption += '\n';
-    caption += '<b>Commit</b>: <a href="' + build.git.remoteUrl + '/tree/' + build.git.commit.long + '">' + build.git.commit.short + '</a>';
+    caption += '\n<b>Changes</b>: <a href="' + build.git.remoteUrl + '/compare/' + fromToCommit + '">' + fromToCommit + '</a>';
   }
   if (build.pullRequestIds || !empty(build.pullRequests)) {
-    caption += '\n';
-    caption += '<b>Pull requests</b>: ' + toDisplayPullRequestList(build);
+    caption += '\n<b>Pull requests</b>: ' + toDisplayPullRequestList(build);
   }
   caption += '\n';
   const checksums = ['md5', 'sha1', 'sha256'];
@@ -1055,6 +1054,18 @@ function sendArray (bot, chatId, array, parseMode, delimiter) {
       bot.sendMessage(chatId, text, {parse_mode: parseMode}).catch(onGlobalError);
     }
   }
+}
+
+function toDisplayDate (seconds) {
+  return new Date(seconds * 1000).toLocaleString('en-GB', {
+    day: 'numeric',
+    month: 'numeric',
+    year: 'numeric',
+    hour: 'numeric',
+    minute: '2-digit',
+    timeZoneName: 'short',
+    timeZone: 'UTC'
+  });
 }
 
 function toDisplayPullRequestList (build) {
@@ -1581,18 +1592,6 @@ function processPrivateCommand (botId, bot, msg, command, commandArgs) {
             }
 
             result += '\n';
-            if (changesUrl) {
-              result += '\n<b>Changes</b>: ' + changesUrl;
-            } else {
-              result += '\n<b>Commit</b>: ' + commitUrl;
-            }
-            if (build.pullRequestIds || !empty(build.pullRequests)) {
-              result += '\n<b>Pull requests</b>: ' + toDisplayPullRequestList(build);
-            }
-
-            if (commandArgs && build.endTime && !build.error && !build.aborted) {
-              result += '\n\n' + commandArgs.trim();
-            }
           } else {
             result = '<code>' + command + (isPrivate && commandArgs ? ' ' + commandArgs : '') + '</code>';
             if (build.aborted) {
@@ -1608,29 +1607,20 @@ function processPrivateCommand (botId, bot, msg, command, commandArgs) {
             }
             result += '\n\n';
             result += '<b>Version</b>: ' + '<code>' + build.version.name + '</code>';
-            if (changesUrl) {
-              result += '\n<b>Changes</b>: ' + changesUrl;
-            } else {
-              result += '\n<b>Commit</b>: ' + commitUrl;
-            }
+          }
+          if (changesUrl) {
+            result += '\n<b>Changes</b>: ' + changesUrl;
+          } else {
+            result += '\n<b>Commit</b>: ' + commitUrl;
             if (build.git.date) {
-              result += ', ' + new Date(build.git.date * 1000).toLocaleString('en-GB', {
-                day: 'numeric',
-                month: 'numeric',
-                year: 'numeric',
-                hour: 'numeric',
-                minute: '2-digit',
-                timeZoneName: 'short',
-                timeZone: 'UTC'
-              });
+              result += ', ' + toDisplayDate(build.git.date);
             }
-            if (build.pullRequestIds || !empty(build.pullRequests)) {
-              result += '\n<b>Pull requests</b>: ' + toDisplayPullRequestList(build);
-            }
-            if (!isPrivate && commandArgs) {
-              result += '\n\n';
-              result += commandArgs.trim();
-            }
+          }
+          if (build.pullRequestIds || !empty(build.pullRequests)) {
+            result += '\n<b>Pull requests</b>: ' + toDisplayPullRequestList(build);
+          }
+          if (commandArgs && ((isPublic && build.endTime && !build.error && !build.aborted) || (!isPublic && !isPrivate))) {
+            result += '\n\n' + commandArgs.trim();
           }
           result += '\n\n';
           if (build.endTime && !build.error && isPublic) {
@@ -1654,7 +1644,7 @@ function processPrivateCommand (botId, bot, msg, command, commandArgs) {
               result += 'You can find <b>APKs</b> below.';
             }
           } else if (build.endTime && build.error && isPublic) {
-            result += 'Another attempt will be made soon.';
+            result += 'Another attempt might be made soon.';
           } else {
             for (let i = 0; i < build.tasks.length; i++) {
               let task = build.tasks[i];
@@ -2006,15 +1996,7 @@ function getChecksumMessage (checksum, apk, displayChecksum) {
   text += '<b>Version</b>: <code>' + apk.version.name + '-' + getDisplayVariant(apk.variant) + '</code>\n';
   text += '<b>Commit</b>: <a href="' + apk.remoteUrl + '/tree/' + apk.commit.long + '">' + apk.commit.short + '</a>';
   if (apk.date) {
-    text += ', ' + new Date(apk.date * 1000).toLocaleString('en-GB', {
-      day: 'numeric',
-      month: 'numeric',
-      year: 'numeric',
-      hour: 'numeric',
-      minute: '2-digit',
-      timeZoneName: 'short',
-      timeZone: 'UTC'
-    });
+    text += ', ' + toDisplayDate(apk.date);
   }
   if (apk.pullRequestIds || !empty(apk.pullRequests)) {
     text += '\n';
