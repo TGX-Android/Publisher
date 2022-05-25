@@ -640,12 +640,18 @@ function getFromToCommit (build) {
   if (build.googlePlayTrack) {
     if (build.previousGooglePlayBuild &&
         build.previousGooglePlayBuild.remoteUrl === build.git.remoteUrl) {
-      return build.previousGooglePlayBuild.commit.short + '...' + build.git.commit.short;
+      return {
+        commit_range: build.previousGooglePlayBuild.commit.short + '...' + build.git.commit.short,
+        from_version: build.previousGooglePlayBuild.version.code
+      };
     }
   } else if (build.telegramTrack) {
     if (build.previousTelegramBuild &&
         build.previousTelegramBuild.remoteUrl === build.git.remoteUrl) {
-      return build.previousTelegramBuild.commit.short + '...' + build.git.commit.short;
+      return {
+        commit_range: build.previousTelegramBuild.commit.short + '...' + build.git.commit.short,
+        from_version: build.previousTelegramBuild.version.code
+      };
     }
   }
   return null;
@@ -667,9 +673,9 @@ function getBuildCaption (build, variant, isPrivate) {
     caption += '\n<b>' + toDisplayAlgorithm(checksum) + '</b>: <a href="https://t.me/tgx_bot?start=' + hash + '">' + hash + '</a>';
   });
 
-  if (build.previousTelegramBuild) {
-    const fromToCommit = build.previousTelegramBuild.commit.short + '...' + build.git.commit.short;
-    caption += '\n\n<b>Changes from ' + build.previousTelegramBuild.version.code + '</b>: <a href="' + build.git.remoteUrl + '/compare/' + fromToCommit + '">' + fromToCommit + '</a>';
+  const fromToCommit = getFromToCommit(build);
+  if (fromToCommit) {
+    caption += '\n\n<b>Changes from ' + fromToCommit.from_version + '</b>: <a href="' + build.git.remoteUrl + '/compare/' + fromToCommit.commit_range + '">' + fromToCommit.commit_range + '</a>';
   }
 
   caption += '\n\n#' + variant;
@@ -1573,7 +1579,7 @@ function processPrivateCommand (botId, bot, msg, command, commandArgs) {
         build.asString = (isPublic, shorten) => {
           const commitUrl = '<a href="' + build.git.remoteUrl + '/tree/' + build.git.commit.long + '">' + build.git.commit.short + '</a>';
           const fromToCommit = getFromToCommit(build);
-          const changesUrl = fromToCommit ? '<a href="' + build.git.remoteUrl + '/compare/' + fromToCommit + '">' + fromToCommit + '</a>' : null;
+          const changesUrl = fromToCommit ? '<a href="' + build.git.remoteUrl + '/compare/' + fromToCommit.commit_range + '">' + fromToCommit.commit_range + '</a>' : null;
           let result = null;
           if (isPublic) {
             const displayTrack = build.googlePlayTrack === 'production' ? 'stable' : build.googlePlayTrack ? build.googlePlayTrack : build.telegramTrack ? build.telegramTrack : null;
@@ -1610,7 +1616,7 @@ function processPrivateCommand (botId, bot, msg, command, commandArgs) {
             result += '<b>Version</b>: ' + '<code>' + build.version.name + '</code>';
           }
           if (changesUrl) {
-            result += '\n<b>Changes</b>: ' + changesUrl;
+            result += '\n<b>Changes from ' + fromToCommit.from_version + '</b>: ' + changesUrl;
           } else {
             result += '\n<b>Commit</b>: ' + commitUrl;
             if (build.git.date) {
