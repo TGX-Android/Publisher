@@ -657,10 +657,6 @@ function getBuildCaption (build, variant, isPrivate) {
   if (build.git.date) {
     caption += ', ' + toDisplayDate(build.git.date);
   }
-  if (build.previousTelegramBuild) {
-    const fromToCommit = build.previousTelegramBuild.commit.short + '...' + build.git.commit.short;
-    caption += '\n<b>Changes</b>: <a href="' + build.git.remoteUrl + '/compare/' + fromToCommit + '">' + fromToCommit + '</a>';
-  }
   if (build.pullRequestIds || !empty(build.pullRequests)) {
     caption += '\n<b>Pull requests</b>: ' + toDisplayPullRequestList(build);
   }
@@ -670,6 +666,11 @@ function getBuildCaption (build, variant, isPrivate) {
     const hash = build.files[variant].apkFile.checksum[checksum];
     caption += '\n<b>' + toDisplayAlgorithm(checksum) + '</b>: <a href="https://t.me/tgx_bot?start=' + hash + '">' + hash + '</a>';
   });
+
+  if (build.previousTelegramBuild) {
+    const fromToCommit = build.previousTelegramBuild.commit.short + '...' + build.git.commit.short;
+    caption += '\n\n<b>Changes from ' + build.previousTelegramBuild.version.code + '</b>: <a href="' + build.git.remoteUrl + '/compare/' + fromToCommit + '">' + fromToCommit + '</a>';
+  }
 
   caption += '\n\n#' + variant;
   switch (build.googlePlayTrack) {
