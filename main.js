@@ -1081,7 +1081,7 @@ function toDisplayPullRequestList (build) {
       const pullRequest = build.pullRequests ? build.pullRequests[pullRequestId] : null;
       const pullRequestUrl = build.git.remoteUrl + '/pull/' + pullRequestId;
       if (pullRequest) {
-        return '<a href="' + pullRequestUrl + '"><b>' + pullRequestId + '</b></a> / <a href="' + pullRequestUrl + '/commits/' + pullRequest.commit.long + '">' + pullRequest.commit.short + '</a>';
+        return '<a href="' + pullRequestUrl + '"><b>' + pullRequestId + '</b></a> / <a href="' + pullRequestUrl + '/files/' + pullRequest.commit.long + '">' + pullRequest.commit.short + '</a>';
       } else {
         return '<a href="' + pullRequestUrl + '"><b>' + pullRequestId + '</b></a>';
       }
@@ -1099,7 +1099,7 @@ function toDisplayPullRequestList (build) {
           } else {
             result += ', ';
           }
-          result += '<a href="' + pullRequestUrl + '"><b>' + pullRequestId + '</b></a> / <a href="' + pullRequestUrl + '/commits/' + pullRequest.commit.long + '">' + pullRequest.commit.short + '</a>';
+          result += '<a href="' + pullRequestUrl + '"><b>' + pullRequestId + '</b></a> / <a href="' + pullRequestUrl + '/files/' + pullRequest.commit.long + '">' + pullRequest.commit.short + '</a>';
         } else {
           result += '<a href="' + pullRequestUrl + '"><b>' + pullRequestId + '</b></a>';
         }
