@@ -1548,11 +1548,12 @@ function processPrivateCommand (botId, bot, msg, command, commandArgs) {
 
           if (build.publicChatId && build.telegramTrack) {
             const id = build.telegramTrack.startsWith('private') ? 'Private' : ucfirst(build.telegramTrack);
+            const targetChatId = (build.googlePlayTrack === 'production') ? ALPHA_CHAT_ID : build.publicChatId;
             build.tasks.push({
-              name: 'publishTelegram' + id,
+              name: 'publishTelegram' + id + (build.googlePlayTrack === 'production' ? 'Draft' : ''),
               needsAwait: true,
               act: (task, callback) => {
-                return publishToTelegram(bot, task, build, callback, build.publicChatId, false, true);
+                return publishToTelegram(bot, task, build, callback, targetChatId, false, true);
               }
             });
           }
@@ -1592,7 +1593,7 @@ function processPrivateCommand (botId, bot, msg, command, commandArgs) {
               }
             } else if (build.endTime) {
               result += build.error ? ' <b>deploy failed</b>.' :
-                build.googlePlayTrack ? ' <a href="' + MARKET_URL + '"><b>released</b></a>.' :
+                build.googlePlayTrack ? ' <a href="' + MARKET_URL + '"><b>' + (build.googlePlayTrack === 'production' ? 'sent to review' : 'released') + '</b></a>.' :
                 ' <b>released</b>.';
             } else {
               result += ' is assembling…';
@@ -1634,7 +1635,7 @@ function processPrivateCommand (botId, bot, msg, command, commandArgs) {
             if (build.googlePlayTrack === 'alpha' || build.googlePlayTrack === 'beta') {
               result += 'Google Play <b>' + (build.googlePlayTrack === 'beta' ? '<a href="' + TESTING_URL + '">' : '') + build.googlePlayTrack + (build.googlePlayTrack === 'beta' ? '</a>' : '') + '</b> will be available within an hour.\n';
             } else if (build.googlePlayTrack === 'production') {
-              result += 'Google Play update will become available for all users gradually.\n';
+              result += 'An update will become available for all users gradually once Google Play review will be finished.\n';
             }
             const variantLinks = [];
             if (build.publicMessages) {
