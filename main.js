@@ -1648,6 +1648,8 @@ function processPrivateCommand (botId, bot, msg, command, commandArgs) {
             }
             if (variantLinks.length) {
               result += 'You can install <b>APKs</b> directly: ' + variantLinks.join(', ') + '.';
+            } else if (build.googlePlayTrack === 'production') {
+              result += '<b>APKs</b> will be published separately.';
             } else {
               result += 'You can find <b>APKs</b> below.';
             }
