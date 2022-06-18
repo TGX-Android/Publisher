@@ -2118,8 +2118,16 @@ function messageCallback (botId, bot, msg) {
     }
   }
 
-  if (botId === 'public' && (msg.chat.username == null || msg.chat.username !== BETA_CHAT_ID) && processPublicCommand(botId, bot, msg, command, commandArgs)) {
-    return;
+  if (botId === 'public' && (msg.chat.username == null || msg.chat.username !== BETA_CHAT_ID)) {
+    try {
+      const success = processPublicCommand(botId, bot, msg, command, commandArgs);
+      if (success) {
+        return;
+      }
+    } catch (e) {
+      console.log(e);
+      return;
+    }
   }
   if (botId === 'private' && msg.chat.id === ADMIN_USER_ID && !msg.reply_to_message) {
     processPrivateCommand(botId, bot, msg, command, commandArgs);
@@ -2131,7 +2139,7 @@ function messageCallback (botId, bot, msg) {
   if (!msg.from || msg.from.id !== ADMIN_USER_ID) {
     bot.forwardMessage(ADMIN_USER_ID, msg.chat.id, msg.message_id).then((forwardedMessage) => {
       db.put('origin_' + botId + '_' + forwardedMessage.message_id, [msg.chat.id, msg.message_id], {valueEncoding: 'json'});
-    });
+    }).catch(onGlobalError);
     return;
   }
   if (msg.chat.id === ADMIN_USER_ID && msg.reply_to_message) {
@@ -2142,7 +2150,7 @@ function messageCallback (botId, bot, msg) {
       let messageId = origin.length > 1 ? origin[1] : 0;
       bot.copyMessage(chatId, msg.chat.id, msg.message_id, {
         reply_to_message_id: messageId,
-      });
+      }).catch(onGlobalError);
     });
     return;
   }
