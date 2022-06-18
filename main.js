@@ -2128,42 +2128,9 @@ function messageCallback (botId, bot, msg) {
         return;
       let chatId = origin[0];
       let messageId = origin.length > 1 ? origin[1] : 0;
-      if (msg.text) {
-        bot.sendMessage(chatId, msg.text, {
-          reply_to_message_id: messageId,
-          entities: msg.entities ? JSON.stringify(msg.entities) : ''
-        }).catch(onGlobalError);
-      } else if (msg.sticker) {
-        bot.sendSticker(chatId, msg.sticker.file_id, {
-          reply_to_message_id: messageId
-        }).catch(onGlobalError);
-      } else if (msg.document) {
-        bot.sendDocument(chatId, msg.document.file_id, {
-          reply_to_message_id: messageId
-        }).catch(onGlobalError);
-      } else if (msg.photo) {
-        bot.sendPhoto(chatId, msg.photo[0].file_id, {
-          reply_to_message_id: messageId
-        }).catch(onGlobalError);
-      } else if (msg.video) {
-        bot.sendVideo(chatId, msg.video.file_id, {
-          reply_to_message_id: messageId
-        }).catch(onGlobalError);
-      } else if (msg.video_note) {
-        bot.sendVideoNote(chatId, msg.video_note.file_id, {
-          reply_to_message_id: messageId
-        }).catch(onGlobalError);
-      } else if (msg.voice) {
-        bot.sendVoice(chatId, msg.voice.file_id, {
-          reply_to_message_id: messageId
-        }).catch(onGlobalError);
-      } else if (msg.audio) {
-        bot.sendAudio(chatId, msg.audio.file_id, {
-          reply_to_message_id: messageId
-        }).catch(onGlobalError);
-      } else {
-        // TODO: any other types of messages?
-      }
+      bot.copyMessage(chatId, msg.chat.id, msg.message_id, {
+        reply_to_message_id: messageId,
+      });
     });
     return;
   }
