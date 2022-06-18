@@ -2030,18 +2030,17 @@ function processPublicCommand (botId, bot, msg, command, commandArgs) {
           'You can send me <b>checksum</b> of an <b>APK file</b> you downloaded, and I can tell whether it corresponds to any <b>Telegram X</b> build I am aware of.\n\n' + 
           '<b>Note</b>: you can always grab a fresh APK from @tgx_log.',
           {parse_mode: 'HTML'}
-        );
+        ).catch(onGlobalError);
       };
       if (commandArgs === 'crash') {
         // Do nothing. Wait for incoming crash file.
       } else if (commandArgs === 'feedback') {
         bot.sendMessage(msg.chat.id, 'Hello! I am the official <b>Telegram X</b> bot.\n\n' +
           'It seems that you want to leave feedback on <b>Telegram X</b>.\n\n' +
-          'You can just send me a well-detailed message and it will get forwarded directly to the project creator.\n\n' +
           'If you want to just write a public app review, you can leave it on <a href="' + MARKET_URL + '">Google Play</a>.\n\n' + 
           'Meanwhile you can send me <b>checksum</b> of an <b>APK file</b> you downloaded from anywhere, and I can tell whether it corresponds to any <b>Telegram X</b> build I am aware of.',
           {parse_mode: 'HTML'}
-        );
+        ).catch(onGlobalError);
       } else if (matchChecksum(commandArgs)) {
         const checksum = matchChecksum(commandArgs);
         findApkByHash(checksum, (err, apk) => {
@@ -2049,14 +2048,14 @@ function processPublicCommand (botId, bot, msg, command, commandArgs) {
             bot.sendMessage(msg.chat.id,
               '<code>' + checksum + '</code> seems to be a hash, but it does not correspond to any <b>Telegram X</b> build I am aware of.',
               {parse_mode: 'HTML'/*, reply_to_message_id: msg.message_id*/}
-            );
+            ).catch(onGlobalError);
           } else {
             bot.sendMessage(msg.chat.id, getChecksumMessage(checksum, apk, true), 
               {
                 parse_mode: 'HTML',
                 disable_web_page_preview: true /*, reply_to_message_id: msg.message_id*/
               }
-            );
+            ).catch(onGlobalError);
           }
         });
       } else {
@@ -2072,7 +2071,7 @@ function processPublicCommand (botId, bot, msg, command, commandArgs) {
             bot.sendMessage(msg.chat.id,
               'This hash does not correspond to any <b>Telegram X</b> I am aware of.',
               {parse_mode: 'HTML', reply_to_message_id: msg.message_id}
-            );
+            ).catch(onGlobalError);
           } else {
             bot.sendMessage(msg.chat.id, getChecksumMessage(checksum, apk, false),
               {
@@ -2080,7 +2079,7 @@ function processPublicCommand (botId, bot, msg, command, commandArgs) {
                 disable_web_page_preview: true,
                 reply_to_message_id: msg.message_id
               }
-            );
+            ).catch(onGlobalError);
           }
         });
         return true;
@@ -2090,7 +2089,7 @@ function processPublicCommand (botId, bot, msg, command, commandArgs) {
     bot.sendMessage(msg.chat.id,
       'Sorry, I can currently process only <b>checksums</b>, not files themselves.',
       {parse_mode: 'HTML', reply_to_message_id: msg.message_id}
-    );
+    ).catch(onGlobalError);
     return (msg.document.file_name && msg.document.file_name.endsWith('.apk')) ||
       (msg.document.mime_type && msg.document.mime_type === APK_MIME_TYPE);
   }
@@ -2136,7 +2135,7 @@ function messageCallback (botId, bot, msg) {
 
   // Chat through forwarded messages
 
-  if (!msg.from || msg.from.id !== ADMIN_USER_ID) {
+  /*if (!msg.from || msg.from.id !== ADMIN_USER_ID) {
     bot.forwardMessage(ADMIN_USER_ID, msg.chat.id, msg.message_id).then((forwardedMessage) => {
       db.put('origin_' + botId + '_' + forwardedMessage.message_id, [msg.chat.id, msg.message_id], {valueEncoding: 'json'});
     }).catch(onGlobalError);
@@ -2153,7 +2152,7 @@ function messageCallback (botId, bot, msg) {
       }).catch(onGlobalError);
     });
     return;
-  }
+  }*/
 }
 
 function queryCallback (botId, bot, query) {
@@ -2196,10 +2195,12 @@ async function onExit (signal, arg1, arg2, callback) {
     });
     return;
   }
-  await db.close();
-  await botMap['private'].sendMessage(ADMIN_USER_ID, 'Bot stopped.').catch(onGlobalError);
+  try {
+    await botMap['private'].sendMessage(ADMIN_USER_ID, 'Bot stopped.');
+  } catch (ignored) {}
   console.log('Killing server…');
-  await server.kill('SIGTERM');
+  server.kill('SIGTERM');
+  await db.close();
   callback();
 }
 
@@ -2243,4 +2244,4 @@ botMap['private'].sendMessage(ADMIN_USER_ID,
   '</code>\npwd: <code>' + process.cwd() + '</code>\nenv:\n<pre>' +
   JSON.stringify(sorted(process.env), null, 2) +
   '</pre>', {parse_mode: 'HTML'}
-);
+).catch(onGlobalError);
