@@ -1732,7 +1732,12 @@ function processPrivateCommand (botId, bot, msg, command, commandArgs) {
           if (build.serviceChatId && build.serviceMessageId) {
             const needMarkup = !build.aborted && !build.endTime;
             const text = build.asString();
-            let params = {chat_id: build.serviceChatId, message_id: build.serviceMessageId, parse_mode: 'HTML'};
+            let params = {
+              chat_id: build.serviceChatId,
+              message_id: build.serviceMessageId,
+              parse_mode: 'HTML',
+              disable_web_page_preview: true
+            };
             if (needMarkup) {
               params.reply_markup = replyMarkup;
             }
@@ -2047,7 +2052,10 @@ function processPublicCommand (botId, bot, msg, command, commandArgs) {
             );
           } else {
             bot.sendMessage(msg.chat.id, getChecksumMessage(checksum, apk, true), 
-              {parse_mode: 'HTML'/*, reply_to_message_id: msg.message_id*/}
+              {
+                parse_mode: 'HTML',
+                disable_web_page_preview: true /*, reply_to_message_id: msg.message_id*/
+              }
             );
           }
         });
@@ -2067,7 +2075,11 @@ function processPublicCommand (botId, bot, msg, command, commandArgs) {
             );
           } else {
             bot.sendMessage(msg.chat.id, getChecksumMessage(checksum, apk, false),
-              {parse_mode: 'HTML', reply_to_message_id: msg.message_id}
+              {
+                parse_mode: 'HTML',
+                disable_web_page_preview: true,
+                reply_to_message_id: msg.message_id
+              }
             );
           }
         });
