@@ -1076,10 +1076,11 @@ function toDisplayDate (seconds) {
 }
 
 function toDisplayPullRequestList (build) {
+  const remoteUrl = build.remoteUrl || (build.git ? build.git.remoteUrl : '');
   if (build.pullRequestIds) {
     return build.pullRequestIds.map((pullRequestId) => {
       const pullRequest = build.pullRequests ? build.pullRequests[pullRequestId] : null;
-      const pullRequestUrl = build.git.remoteUrl + '/pull/' + pullRequestId;
+      const pullRequestUrl = remoteUrl + '/pull/' + pullRequestId;
       if (pullRequest) {
         return '<a href="' + pullRequestUrl + '"><b>' + pullRequestId + '</b></a> / <a href="' + pullRequestUrl + '/files/' + pullRequest.commit.long + '">' + pullRequest.commit.short + '</a>';
       } else {
@@ -1092,7 +1093,7 @@ function toDisplayPullRequestList (build) {
     for (const pullRequestId in build.pullRequests) {
       if (build.pullRequests.hasOwnProperty(pullRequestId)) {
         const pullRequest = build.pullRequests[pullRequestId];
-        const pullRequestUrl = build.git.remoteUrl + '/pull/' + pullRequestId;
+        const pullRequestUrl = remoteUrl + '/pull/' + pullRequestId;
         if (pullRequest) {
           if (first) {
             first = false;
@@ -2017,7 +2018,6 @@ function getChecksumMessage (checksum, apk, displayChecksum) {
     text += '\n';
     text += '<b>Pull requests</b>: ' + toDisplayPullRequestList(apk);
   }
-
   return text;
 }
 
@@ -2050,7 +2050,7 @@ function processPublicCommand (botId, bot, msg, command, commandArgs) {
               {parse_mode: 'HTML'/*, reply_to_message_id: msg.message_id*/}
             ).catch(onGlobalError);
           } else {
-            bot.sendMessage(msg.chat.id, getChecksumMessage(checksum, apk, true), 
+            bot.sendMessage(msg.chat.id, getChecksumMessage(checksum, apk, true),
               {
                 parse_mode: 'HTML',
                 disable_web_page_preview: true /*, reply_to_message_id: msg.message_id*/
