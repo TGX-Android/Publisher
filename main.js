@@ -23,7 +23,10 @@ const fs = require('fs'),
       level = require('level'),
       crypto = require('crypto'),
       TelegramBot = require('node-telegram-bot-api'),
-      path = require('path');
+      path = require('path'),
+      https = require('https'),
+      http = require('http'),
+      iconv = require('iconv-lite');
 const { spawn, exec, execSync } = require('child_process');
 const { google } = require('googleapis');
 
@@ -322,6 +325,57 @@ function getLocalChanges (callback) {
     }
     const changes = trimIndent(stdout).trim();
     callback(changes && changes.length ? changes : null);
+  });
+}
+
+function fetchHttp (url, needBinary) {
+  return new Promise((accept, reject) => {
+    const parsed = new URL(url);
+    const protocol = (parsed.protocol === 'https:' ? https : http);
+    try {
+      protocol.get({
+        host: parsed.host,
+        path: parsed.pathname + parsed.search
+      }, (res) => {
+        if (res.statusCode < 200 || res.statusCode >= 300) {
+          reject(res);
+          return;
+        }
+        toUtf8(res, (contentType, content) => {
+          accept({content, type: contentType});
+        }, needBinary);
+      }).on('error', reject);
+    } catch (e) {
+      console.error('Cannot fetch', url, e);
+    }
+  });
+}
+
+function toUtf8 (res, onDone, needBinary) {
+  const contentType = (res.headers['content-type'] || '').split(';');
+  let encoding = null;
+  for (let i = 0; i < contentType.length; i++) {
+    const keyValue = contentType[i].split('=');
+    if (keyValue.length === 2 && keyValue[0].toLowerCase() === 'charset') {
+      encoding = keyValue[1].toLowerCase();
+    }
+  }
+  let data = [];
+  res.setEncoding('binary');
+  res.on('data', (chunk) => {
+    data.push(Buffer.from(chunk, 'binary'));
+  });
+  res.on('end', () => {
+    const binary = Buffer.concat(data);
+    if (needBinary) {
+      onDone(contentType, binary);
+    } else {
+      if (encoding && encoding !== 'utf-8') {
+        onDone(contentType, iconv.encode(iconv.decode(binary, encoding), 'utf-8'));
+      } else {
+        onDone(contentType, binary.toString('utf-8'));
+      }
+    }
   });
 }
 
@@ -1077,39 +1131,30 @@ function toDisplayDate (seconds) {
 
 function toDisplayPullRequestList (build) {
   const remoteUrl = build.remoteUrl || (build.git ? build.git.remoteUrl : '');
+  const toItem = (pullRequestId, pullRequestCommit, pullRequest) => {
+    const pullRequestUrl = remoteUrl + '/pull/' + pullRequestId;
+    let text = '<a href="' + pullRequestUrl + '"><b>' + pullRequestId + '</b></a>';
+    if (pullRequest) {
+      text += ' / <a href="' + pullRequestUrl + '/files/' + pullRequest.commit.long + '">' + pullRequest.commit.short + '</a>';
+      if (pullRequest.github) {
+        text += ' by <a href="' + (pullRequest.github.url || 'https://github.com/' + pullRequest.github.name) + '">' + pullRequest.github.name + '</a>';
+      }
+    } else if (pullRequestCommit) {
+      text += ' / <a href="' + pullRequestUrl + '/files/' + pullRequestCommit + '">' + pullRequestCommit + '</a>';
+    }
+    return text;
+  };
   if (build.pullRequestsMetadata) {
     return build.pullRequestsMetadata.map((pullRequestMetadata) => {
       const pullRequestId = pullRequestMetadata.id;
       const pullRequest = build.pullRequests ? build.pullRequests[pullRequestId] : null;
-      const pullRequestUrl = remoteUrl + '/pull/' + pullRequestId;
-      if (pullRequest) {
-        return '<a href="' + pullRequestUrl + '"><b>' + pullRequestId + '</b></a> / <a href="' + pullRequestUrl + '/files/' + pullRequest.commit.long + '">' + pullRequest.commit.short + '</a>';
-      } else if (pullRequestMetadata.commit) {
-        return '<a href="' + pullRequestUrl + '"><b>' + pullRequestId + '</b></a> / <a href="' + pullRequestUrl + '/files/' + pullRequestMetadata.commit + '">' + pullRequestMetadata.commit + '</a>';
-      } else {
-        return '<a href="' + pullRequestUrl + '"><b>' + pullRequestId + '</b></a>';
-      }
+      return toItem(pullRequestId, pullRequestMetadata.commit, pullRequest);
     }).join(', ');
   } else if (build.pullRequests) {
-    let result = '';
-    let first = true;
-    for (const pullRequestId in build.pullRequests) {
-      if (build.pullRequests.hasOwnProperty(pullRequestId)) {
-        const pullRequest = build.pullRequests[pullRequestId];
-        const pullRequestUrl = remoteUrl + '/pull/' + pullRequestId;
-        if (pullRequest) {
-          if (first) {
-            first = false;
-          } else {
-            result += ', ';
-          }
-          result += '<a href="' + pullRequestUrl + '"><b>' + pullRequestId + '</b></a> / <a href="' + pullRequestUrl + '/files/' + pullRequest.commit.long + '">' + pullRequest.commit.short + '</a>';
-        } else {
-          result += '<a href="' + pullRequestUrl + '"><b>' + pullRequestId + '</b></a>';
-        }
-      }
-    }
-    return result;
+    return Object.keys(build.pullRequests).map((pullRequestId) => {
+      const pullRequest = build.pullRequests[pullRequestId];
+      return toItem(parseInt(pullRequestId), null, pullRequest);
+    }).join(', ');
   } else {
     return '';
   }
@@ -1377,6 +1422,30 @@ function processPrivateCommand (botId, bot, msg, command, commandArgsRaw) {
             '--skip-sdk-setup'
           ]
         };
+        const newFetchGithubDetailsTask = (pullRequestId) => {
+          return {
+            name: 'fetchGithubDetails',
+            act: (task, callback) => {
+              const pullRequest = build.pullRequests[pullRequestId];
+              const infoUrl = build.git.remoteUrl.replace(/(?<=(^https?:\/\/))github\.com(?=\/)/gi, 'api.github.com/repos') + '/commits/' + pullRequest.commit.long;
+              const url = new URL(infoUrl);
+              fetchHttp(url).then((response) => {
+                const githubInfo = JSON.parse(response.content);
+                const author = githubInfo.author.login;
+                const authorUrl = githubInfo.author.html_url;
+                const pullRequest = build.pullRequests[pullRequestId];
+                pullRequest.github = {
+                  name: author,
+                  url: authorUrl
+                };
+                callback(0);
+              }).catch((e) => {
+                console.log('fetchHttp failed', infoUrl, e.message);
+                callback(1);
+              })
+            }
+          };
+        };
         if (command === '/checkout') {
           let appId = commandArgs['app.id'] || settings.app.id;
           let appName = commandArgs['app.name'] || settings.app.name;
@@ -1410,9 +1479,14 @@ function processPrivateCommand (botId, bot, msg, command, commandArgsRaw) {
                 properties += 'pr.ids=' + prIds.join(',') + '\n';
                 for (const pullRequestId in build.pullRequests) {
                   const pullRequest = build.pullRequests[pullRequestId];
+                  if (!pullRequest.github) {
+                    callback(1);
+                    return;
+                  }
                   properties += 'pr.' + pullRequestId + '.commit_short=' + pullRequest.commit.short + '\n';
                   properties += 'pr.' + pullRequestId + '.commit_long=' + pullRequest.commit.long + '\n';
-                  properties += 'pr.' + pullRequestId + '.author=' + pullRequest.author + '\n';
+                  properties += 'pr.' + pullRequestId + '.author=' + pullRequest.github.name + '\n';
+                  properties += 'pr.' + pullRequestId + '.author_url=' + pullRequest.github.url + '\n';
                   if (pullRequest.date) {
                     properties += 'pr.' + pullRequestId + '.date=' + pullRequest.date + '\n';
                   }
@@ -1494,6 +1568,9 @@ function processPrivateCommand (botId, bot, msg, command, commandArgsRaw) {
               };
               build.tasks.push(updatePrInfoTask);
 
+              const fetchGithubDetailsTask = newFetchGithubDetailsTask(pullRequestId);
+              build.tasks.push(fetchGithubDetailsTask);
+
               const squashPrTask = {
                 name: 'squashPr-' + pullRequestId,
                 cmd: 'git merge main -m "Sync with main" && \
@@ -1549,6 +1626,25 @@ function processPrivateCommand (botId, bot, msg, command, commandArgsRaw) {
                     return {id};
                   }
                 });
+                let remaining = prIds.length;
+                let finished = false;
+                for (let i = 0; i < prIds.length; i++) {
+                  const fetchGithubDetailsTask = newFetchGithubDetailsTask(prIds[i]);
+                  fetchGithubDetailsTask.act(task, (code) => {
+                    if (finished)
+                      return;
+                    if (code !== 0) {
+                      finished = true;
+                      callback(code);
+                      return;
+                    }
+                    remaining--;
+                    if (remaining === 0) {
+                      finished = true;
+                      callback(0);
+                    }
+                  })
+                }
                 callback(0);
               });
             }
