@@ -54,6 +54,7 @@ const ADMIN_USER_ID = settings.telegram.admin_user_id;
 const BETA_CHAT_ID = settings.telegram.target_chat_id.public_builds;
 const PR_CHAT_ID = settings.telegram.target_chat_id.pr_builds;
 const ALPHA_CHAT_ID = LOCAL ? ADMIN_USER_ID : settings.telegram.target_chat_id.private_builds;
+const INTERNAL_CHAT_ID = settings.telegram.target_chat_id.internal_builds;
 
 const TELEGRAM_API_TOKEN_2 = settings.tokens.verifier.production;
 
@@ -1309,9 +1310,10 @@ function processPrivateCommand (botId, bot, msg, command, commandArgsRaw) {
           return result;
         }, {});
 
+        const isPRBuild = command === '/deploy_pr';
         const isPrivate = !(['/deploy_beta', '/deploy_stable', '/deploy_pr'].includes(command));
         const skipBuild = command === '/update_sdk';
-        const outputChatId = command === '/deploy_pr' ? PR_CHAT_ID : isPrivate ? (buildType === 'alpha' ? ALPHA_CHAT_ID : ADMIN_USER_ID) : BETA_CHAT_ID;
+        const outputChatId = isPRBuild ? PR_CHAT_ID : isPrivate ? (buildType === 'alpha' ? ALPHA_CHAT_ID : ADMIN_USER_ID) : BETA_CHAT_ID;
         const buildId = nextBuildId();
         const isSetup = '/checkout' === command;
 
@@ -1350,8 +1352,10 @@ function processPrivateCommand (botId, bot, msg, command, commandArgsRaw) {
         cur.pending_build = build;
         if (build.googlePlayTrack) {
           build.telegramTrack = build.googlePlayTrack;
-        } else if (build.publicChatId) {
+        } else if (build.publicChatId && !isPRBuild) {
           build.telegramTrack = 'private' + build.publicChatId;
+        } else if (isPRBuild && build.pullRequestsMetadata) {
+          build.telegramTrack = 'PR#' + build.pullRequestsMetadata.map((pullRequestsMetadata) => pullRequestsMetadata.id).join(',');
         }
 
         if (build.git.branch !== 'main' && (build.googlePlayTrack || build.telegramTrack)) {
@@ -1614,6 +1618,9 @@ function processPrivateCommand (botId, bot, msg, command, commandArgsRaw) {
                   callback(0);
                   return;
                 }
+                if (isPRBuild && !build.telegramTrack) {
+                  build.telegramTrack = 'PR#' + prIds.join(',');
+                }
                 build.pullRequests = {};
                 for (let i = 0; i < prIds.length; i++) {
                   const pullRequestId = prIds[i];
@@ -1701,19 +1708,19 @@ function processPrivateCommand (botId, bot, msg, command, commandArgsRaw) {
                 return uploadToTelegram(bot, task, build, originalVariant, callback);
               }
             });
-            if (build.publicChatId && build.telegramTrack && originalVariant === 'universal' && build.variants.length > 1) {
+            if (build.publicChatId && (build.telegramTrack || isPRBuild) && originalVariant === 'universal' && build.variants.length > 1) {
               build.tasks.push({
                 name: 'publishTelegramInternal',
                 needsAwait: true,
                 act: (task, callback) => {
-                  return publishToTelegram(bot, task, build, callback, ALPHA_CHAT_ID, true, false);
+                  return publishToTelegram(bot, task, build, callback, isPRBuild ? INTERNAL_CHAT_ID : ALPHA_CHAT_ID, true, false);
                 }
               })
             }
           });
 
-          if (build.publicChatId && build.telegramTrack) {
-            const id = build.telegramTrack.startsWith('private') ? 'Private' : ucfirst(build.telegramTrack);
+          if (build.publicChatId && (build.telegramTrack || isPRBuild)) {
+            const id = isPRBuild ? 'PR' : build.telegramTrack.startsWith('private') ? 'Private' : ucfirst(build.telegramTrack);
             const targetChatId = (build.googlePlayTrack === 'production') ? ALPHA_CHAT_ID : build.publicChatId;
             build.tasks.push({
               name: 'publishTelegram' + id + (build.googlePlayTrack === 'production' ? 'Draft' : ''),
@@ -1749,7 +1756,11 @@ function processPrivateCommand (botId, bot, msg, command, commandArgsRaw) {
           const changesUrl = fromToCommit ? '<a href="' + build.git.remoteUrl + '/compare/' + fromToCommit.commit_range + '">' + fromToCommit.commit_range + '</a>' : null;
           let result = null;
           if (isPublic) {
-            const displayTrack = build.googlePlayTrack === 'production' ? 'stable' : build.googlePlayTrack ? build.googlePlayTrack : build.telegramTrack ? build.telegramTrack : null;
+            const displayTrack =
+              build.googlePlayTrack === 'production' ? 'stable' :
+              build.googlePlayTrack ? build.googlePlayTrack :
+              build.telegramTrack ? build.telegramTrack :
+              null;
             result = '<code>' + build.version.name + (displayTrack ? ' ' + displayTrack : '') + '</code>';
             if (build.aborted) {
               if (build.endTime) {
