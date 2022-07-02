@@ -663,7 +663,7 @@ function getBuildCaption (build, variant, isPrivate) {
   if (build.git.date) {
     caption += ', ' + toDisplayDate(build.git.date);
   }
-  if (build.pullRequestIds || !empty(build.pullRequests)) {
+  if (build.pullRequestsMetadata || !empty(build.pullRequests)) {
     caption += '\n<b>Pull requests</b>: ' + toDisplayPullRequestList(build);
   }
   caption += '\n';
@@ -1077,12 +1077,15 @@ function toDisplayDate (seconds) {
 
 function toDisplayPullRequestList (build) {
   const remoteUrl = build.remoteUrl || (build.git ? build.git.remoteUrl : '');
-  if (build.pullRequestIds) {
-    return build.pullRequestIds.map((pullRequestId) => {
+  if (build.pullRequestsMetadata) {
+    return build.pullRequestsMetadata.map((pullRequestMetadata) => {
+      const pullRequestId = pullRequestMetadata.id;
       const pullRequest = build.pullRequests ? build.pullRequests[pullRequestId] : null;
       const pullRequestUrl = remoteUrl + '/pull/' + pullRequestId;
       if (pullRequest) {
         return '<a href="' + pullRequestUrl + '"><b>' + pullRequestId + '</b></a> / <a href="' + pullRequestUrl + '/files/' + pullRequest.commit.long + '">' + pullRequest.commit.short + '</a>';
+      } else if (pullRequestMetadata.commit) {
+        return '<a href="' + pullRequestUrl + '"><b>' + pullRequestId + '</b></a> / <a href="' + pullRequestUrl + '/files/' + pullRequestMetadata.commit + '">' + pullRequestMetadata.commit + '</a>';
       } else {
         return '<a href="' + pullRequestUrl + '"><b>' + pullRequestId + '</b></a>';
       }
@@ -1252,12 +1255,21 @@ function processPrivateCommand (botId, bot, msg, command, commandArgs) {
         const skipBuild = command === '/update_sdk';
         const outputChatId = isPrivate ? (buildType === 'alpha' ? ALPHA_CHAT_ID : ADMIN_USER_ID) : BETA_CHAT_ID;
         const buildId = nextBuildId();
-        const pullRequestIds = !['/checkout'].includes(command) ? null : commandArgsList.filter((arg) =>
+        const pullRequestsMetadata = !['/checkout'].includes(command) ? null : commandArgsList.filter((arg) =>
           arg.match(/^[0-9]+$/gi)
         ).map((prId) =>
           parseInt(prId)
         ).filter((prId) => prId > 0)
-         .sort();
+         .sort()
+         .map((id) => {
+           return {id};
+         })
+         .concat(commandArgsList.filter((arg) =>
+           arg.match(/^[0-9]+:[a-zA-Z0-9]+$/gi)
+         ).map((idWithCommit) => {
+           const data = idWithCommit.split(':');
+           return {id: parseInt(data[0]), commit: data[1]};
+         }).filter((pullRequest) => pullRequest.id > 0));
         const build = {
           id: buildId,
           type: buildType,
@@ -1267,8 +1279,8 @@ function processPrivateCommand (botId, bot, msg, command, commandArgs) {
           googlePlayTrack: buildType === 'stable' ? 'production' : buildType === 'beta' || buildType === 'alpha' ? buildType : null,
           files: {}
         };
-        if (pullRequestIds && pullRequestIds.length) {
-          build.pullRequestIds = pullRequestIds;
+        if (pullRequestsMetadata && pullRequestsMetadata.length) {
+          build.pullRequestsMetadata = pullRequestsMetadata;
           build.pullRequests = {};
         }
         if (outputChatId !== build.serviceChatId) {
@@ -1353,7 +1365,7 @@ function processPrivateCommand (botId, bot, msg, command, commandArgs) {
               'telegram.api_hash=' + settings.telegram.app.api_hash + '\n' +
               'youtube.api_key=' + settings.youtube.api_key + '\n';
             if (!empty(build.pullRequests)) {
-              properties += 'pr.ids=' + build.pullRequestIds.join(',') + '\n';
+              properties += 'pr.ids=' + build.pullRequestsMetadata.map((pullRequest) => pullRequest.id).join(',') + '\n';
               for (const pullRequestId in build.pullRequests) {
                 const pullRequest = build.pullRequests[pullRequestId];
                 properties += 'pr.' + pullRequestId + '.commit_short=' + pullRequest.commit.short + '\n';
@@ -1404,20 +1416,24 @@ function processPrivateCommand (botId, bot, msg, command, commandArgs) {
           };
           build.tasks.push(resetTask);
           build.tasks.push(checkoutTask);
-          if (build.pullRequestIds) {
+          if (build.pullRequestsMetadata) {
             if (LOCAL)
               throw Error('Unsupported!');
 
-            for (let i = 0; i < build.pullRequestIds.length; i++) {
+            for (let i = 0; i < build.pullRequestsMetadata.length; i++) {
               const isSecondary = i > 0;
-              const pullRequestId = build.pullRequestIds[i];
+              const pullRequest = build.pullRequestsMetadata[i];
+              const pullRequestId = pullRequest.id;
 
               const preparePrTask = {
-                name: 'fetchPr-' + pullRequestId,
+                name: 'fetchPr-' + pullRequestId + (pullRequest.commit ? ':' + pullRequest.commit : ''),
                 cmd: '(git branch -D pr-' + pullRequestId + ' || true) && \
                       git fetch origin pull/' + pullRequestId + '/head:pr-' + pullRequestId + ' && \
                       ' + (isSecondary ? 'git stash &&' : '') + ' \
-                      git checkout pr-' + pullRequestId
+                      git checkout pr-' + pullRequestId + (
+                        pullRequest.commit ? ' && \
+                        git reset --hard ' + pullRequest.commit : ''
+                      )
               };
               build.tasks.push(preparePrTask);
 
@@ -1475,7 +1491,6 @@ function processPrivateCommand (botId, bot, msg, command, commandArgs) {
                   callback(0);
                   return;
                 }
-                build.pullRequestIds = prIds;
                 build.pullRequests = {};
                 for (let i = 0; i < prIds.length; i++) {
                   const pullRequestId = prIds[i];
@@ -1488,6 +1503,14 @@ function processPrivateCommand (botId, bot, msg, command, commandArgs) {
                     date: getProperty(data, 'pr.' + pullRequestId + '.date')
                   }
                 }
+                build.pullRequestsMetadata = prIds.map((id) => {
+                  const pullRequest = build.pullRequests[id];
+                  if (pullRequest) {
+                    return {id, commit: pullRequest.commit.short};
+                  } else {
+                    return {id};
+                  }
+                });
                 callback(0);
               });
             }
@@ -1625,7 +1648,7 @@ function processPrivateCommand (botId, bot, msg, command, commandArgs) {
               result += ', ' + toDisplayDate(build.git.date);
             }
           }
-          if (build.pullRequestIds || !empty(build.pullRequests)) {
+          if (build.pullRequestsMetadata || !empty(build.pullRequests)) {
             result += '\n<b>Pull requests</b>: ' + toDisplayPullRequestList(build);
           }
           if (commandArgs && ((isPublic && build.endTime && !build.error && !build.aborted) || (!isPublic && !isPrivate))) {
@@ -2014,7 +2037,7 @@ function getChecksumMessage (checksum, apk, displayChecksum) {
   if (apk.date) {
     text += ', ' + toDisplayDate(apk.date);
   }
-  if (apk.pullRequestIds || !empty(apk.pullRequests)) {
+  if (apk.pullRequestsMetadata || !empty(apk.pullRequests)) {
     text += '\n';
     text += '<b>Pull requests</b>: ' + toDisplayPullRequestList(apk);
   }
