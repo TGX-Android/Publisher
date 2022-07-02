@@ -337,16 +337,13 @@ function fetchHttp (url, needBinary) {
         host: parsed.host,
         path: parsed.pathname + parsed.search
       }, (res) => {
-        if (res.statusCode < 200 || res.statusCode >= 300) {
-          reject(res);
-          return;
-        }
         toUtf8(res, (contentType, content) => {
-          accept({content, type: contentType});
+          accept({statusCode: res.statusCode, statusMessage: res.statusMessage, content, contentType});
         }, needBinary);
       }).on('error', reject);
     } catch (e) {
       console.error('Cannot fetch', url, e);
+      reject(e);
     }
   });
 }
@@ -1430,6 +1427,11 @@ function processPrivateCommand (botId, bot, msg, command, commandArgsRaw) {
               const infoUrl = build.git.remoteUrl.replace(/(?<=(^https?:\/\/))github\.com(?=\/)/gi, 'api.github.com/repos') + '/commits/' + pullRequest.commit.long;
               const url = new URL(infoUrl);
               fetchHttp(url).then((response) => {
+                if (response.statusCode < 200 || response.statusCode >= 300) {
+                  console.log('fetchHttp failed', response.statusCode, response.statusMessage, response.contentType, response.content);
+                  callback(1);
+                  return;
+                }
                 const githubInfo = JSON.parse(response.content);
                 const author = githubInfo.author.login;
                 const authorUrl = githubInfo.author.html_url;
@@ -1440,7 +1442,7 @@ function processPrivateCommand (botId, bot, msg, command, commandArgsRaw) {
                 };
                 callback(0);
               }).catch((e) => {
-                console.log('fetchHttp failed', infoUrl, e.message);
+                console.log('fetchHttp failed', infoUrl, e);
                 callback(1);
               })
             }
