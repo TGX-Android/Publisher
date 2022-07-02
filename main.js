@@ -1115,7 +1115,7 @@ function toDisplayPullRequestList (build) {
   }
 }
 
-function processPrivateCommand (botId, bot, msg, command, commandArgs) {
+function processPrivateCommand (botId, bot, msg, command, commandArgsRaw) {
   if (msg.chat.id !== ADMIN_USER_ID) {
     return;
   }
@@ -1125,8 +1125,8 @@ function processPrivateCommand (botId, bot, msg, command, commandArgs) {
       break;
     }
     case '/value': {
-      if (commandArgs) {
-        db.get(commandArgs, {valueEncoding: 'json'}, (err, value) => {
+      if (commandArgsRaw) {
+        db.get(commandArgsRaw, {valueEncoding: 'json'}, (err, value) => {
           if (err) {
             bot.sendMessage(msg.chat.id, '*Key not found!*', {parse_mode: 'MarkdownV2'}).catch(onGlobalError);
           } else {
@@ -1249,13 +1249,29 @@ function processPrivateCommand (botId, bot, msg, command, commandArgs) {
           specificVariant = null;
         }
 
-        const commandArgsList = commandArgs ? commandArgs.split(/[,\s]+/) : [];
+        const commandArgsList = commandArgsRaw ? commandArgsRaw.split(/[,\s]+/) : [];
+        const commandArgs = commandArgsList.filter((arg) => arg.startsWith('--')).reduce((result, item) => {
+          const index = item.indexOf('=');
+          if (index !== -1) {
+            const key = item.substring(2, index);
+            const value = item.substring(index + 1);
+            result[key] = value.match(/^[0-9]+$/g) ? parseInt(value) :
+              value.match(/^[0-9]+\.[0-9]+$/g) ? parseFloat(value) :
+              value;
+          } else {
+            const key = item.substring(2);
+            result[key] = true;
+          }
+          return result;
+        }, {});
 
         const isPrivate = !(['/deploy_beta', '/deploy_stable'].includes(command));
         const skipBuild = command === '/update_sdk';
         const outputChatId = isPrivate ? (buildType === 'alpha' ? ALPHA_CHAT_ID : ADMIN_USER_ID) : BETA_CHAT_ID;
         const buildId = nextBuildId();
-        const pullRequestsMetadata = !['/checkout'].includes(command) ? null : commandArgsList.filter((arg) =>
+        const isSetup = '/checkout' === command;
+
+        const pullRequestsMetadata = !isSetup ? null : commandArgsList.filter((arg) =>
           arg.match(/^[0-9]+$/gi)
         ).map((prId) =>
           parseInt(prId)
@@ -1270,6 +1286,7 @@ function processPrivateCommand (botId, bot, msg, command, commandArgs) {
            const data = idWithCommit.split(':');
            return {id: parseInt(data[0]), commit: data[1]};
          }).filter((pullRequest) => pullRequest.id > 0));
+
         const build = {
           id: buildId,
           type: buildType,
@@ -1352,44 +1369,6 @@ function processPrivateCommand (botId, bot, msg, command, commandArgs) {
             });
           }
         };
-        const updateSettingsTask = {
-          name: 'updateSettings',
-          act: (task, callback) => {
-            let properties = 'sdk.dir=' + settings.ANDROID_SDK_ROOT + '\n' +
-              'keystore.file=' + settings.TGX_KEYSTORE_PATH + '\n' +
-              'app.id=' + settings.app.id + '\n' +
-              'app.name=' + settings.app.name + '\n' +
-              'app.download_url=' + settings.app.download_url + '\n' +
-              'app.sources_url=' + settings.app.sources_url + '\n' +
-              'telegram.api_id=' + settings.telegram.app.api_id + '\n' +
-              'telegram.api_hash=' + settings.telegram.app.api_hash + '\n' +
-              'youtube.api_key=' + settings.youtube.api_key + '\n';
-            if (!empty(build.pullRequests)) {
-              properties += 'pr.ids=' + build.pullRequestsMetadata.map((pullRequest) => pullRequest.id).join(',') + '\n';
-              for (const pullRequestId in build.pullRequests) {
-                const pullRequest = build.pullRequests[pullRequestId];
-                properties += 'pr.' + pullRequestId + '.commit_short=' + pullRequest.commit.short + '\n';
-                properties += 'pr.' + pullRequestId + '.commit_long=' + pullRequest.commit.long + '\n';
-                properties += 'pr.' + pullRequestId + '.author=' + pullRequest.author + '\n';
-                if (pullRequest.date) {
-                  properties += 'pr.' + pullRequestId + '.date=' + pullRequest.date + '\n';
-                }
-              }
-            }
-            fs.writeFile(settings.TGX_SOURCE_PATH + '/local.properties',
-              properties,
-              'utf-8',
-              (err) => {
-                if (err) {
-                  console.error('Cannot create local.properties file', err);
-                  callback(1);
-                } else {
-                  callback(0);
-                }
-              }
-            );
-          }
-        }
         const buildDependenciesTask = {
           name: 'buildDependencies',
           silence: true,
@@ -1399,6 +1378,65 @@ function processPrivateCommand (botId, bot, msg, command, commandArgs) {
           ]
         };
         if (command === '/checkout') {
+          let appId = commandArgs['app.id'] || settings.app.id;
+          let appName = commandArgs['app.name'] || settings.app.name;
+
+          const updateSettingsTask = {
+            name: 'updateSettings',
+            act: (task, callback) => {
+              let properties = 'sdk.dir=' + settings.ANDROID_SDK_ROOT + '\n' +
+                'keystore.file=' + settings.TGX_KEYSTORE_PATH + '\n' +
+                'app.download_url=' + settings.app.download_url + '\n' +
+                'app.sources_url=' + settings.app.sources_url + '\n' +
+                'telegram.api_id=' + settings.telegram.app.api_id + '\n' +
+                'telegram.api_hash=' + settings.telegram.app.api_hash + '\n' +
+                'youtube.api_key=' + settings.youtube.api_key + '\n';
+              if (!empty(build.pullRequests)) {
+                const prIds = build.pullRequestsMetadata.map((pullRequestMetadata) => pullRequestMetadata.id);
+                const prAuthors = [... new Set(build.pullRequestsMetadata.map((pullRequestMetadata) => {
+                  const pullRequest = build.pullRequests[pullRequestMetadata.id];
+                  return pullRequest.author;
+                }).filter((author) => author && author.length))];
+                if (commandArgs.contest) {
+                  if (prAuthors.length !== 1) {
+                    console.log('Contest builds should be made by 1 author', !prAuthors.length ? 'empty' : prAuthors.join(', '));
+                    callback(1);
+                    return;
+                  }
+                  appName = 'X #' + prIds.join(',') + ' by ' + prAuthors.join(' & ');
+                  appId = 'com.contest.' + prAuthors.map((author) => author.toLowerCase().replace(/[^a-zA-Z0-9_]/gi, '_')).sort().join('_');
+                }
+
+                properties += 'pr.ids=' + prIds.join(',') + '\n';
+                for (const pullRequestId in build.pullRequests) {
+                  const pullRequest = build.pullRequests[pullRequestId];
+                  properties += 'pr.' + pullRequestId + '.commit_short=' + pullRequest.commit.short + '\n';
+                  properties += 'pr.' + pullRequestId + '.commit_long=' + pullRequest.commit.long + '\n';
+                  properties += 'pr.' + pullRequestId + '.author=' + pullRequest.author + '\n';
+                  if (pullRequest.date) {
+                    properties += 'pr.' + pullRequestId + '.date=' + pullRequest.date + '\n';
+                  }
+                }
+              }
+              properties +=
+                'app.id=' + appId + '\n' +
+                'app.name=' + appName + '\n' +
+                'app.experimental=' + (appId !== settings.app.id || !!commandArgs.experimental) + '\n';
+              fs.writeFile(settings.TGX_SOURCE_PATH + '/local.properties',
+                properties,
+                'utf-8',
+                (err) => {
+                  if (err) {
+                    console.error('Cannot create local.properties file', err);
+                    callback(1);
+                  } else {
+                    callback(0);
+                  }
+                }
+              );
+            }
+          }
+
           const resetTask = {
             name: 'reset',
             silence: true,
@@ -1625,7 +1663,7 @@ function processPrivateCommand (botId, bot, msg, command, commandArgs) {
 
             result += '\n';
           } else {
-            result = '<code>' + command + (isPrivate && commandArgs ? ' ' + commandArgs : '') + '</code>';
+            result = '<code>' + command + (isPrivate && commandArgsRaw ? ' ' + commandArgsRaw : '') + '</code>';
             if (build.aborted) {
               if (build.endTime) {
                 result += ' <b>canceled</b>.';
@@ -1651,8 +1689,8 @@ function processPrivateCommand (botId, bot, msg, command, commandArgs) {
           if (build.pullRequestsMetadata || !empty(build.pullRequests)) {
             result += '\n<b>Pull requests</b>: ' + toDisplayPullRequestList(build);
           }
-          if (commandArgs && ((isPublic && build.endTime && !build.error && !build.aborted) || (!isPublic && !isPrivate))) {
-            result += '\n\n' + commandArgs.trim();
+          if (commandArgsRaw && ((isPublic && build.endTime && !build.error && !build.aborted) || (!isPublic && !isPrivate))) {
+            result += '\n\n' + commandArgsRaw.trim();
           }
           result += '\n\n';
           if (build.endTime && !build.error && isPublic) {
