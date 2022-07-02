@@ -52,6 +52,7 @@ const MARKET_URL = settings.url.market;
 
 const ADMIN_USER_ID = settings.telegram.admin_user_id;
 const BETA_CHAT_ID = settings.telegram.target_chat_id.public_builds;
+const PR_CHAT_ID = settings.telegram.target_chat_id.pr_builds;
 const ALPHA_CHAT_ID = LOCAL ? ADMIN_USER_ID : settings.telegram.target_chat_id.private_builds;
 
 const TELEGRAM_API_TOKEN_2 = settings.tokens.verifier.production;
@@ -1250,6 +1251,7 @@ function processPrivateCommand (botId, bot, msg, command, commandArgsRaw) {
     case '/deploy_stable':
     case '/deploy_beta':
     case '/deploy_alpha': // same as universal
+    case '/deploy_pr':
     
     case '/build':
     case '/build_arm32':
@@ -1307,9 +1309,9 @@ function processPrivateCommand (botId, bot, msg, command, commandArgsRaw) {
           return result;
         }, {});
 
-        const isPrivate = !(['/deploy_beta', '/deploy_stable'].includes(command));
+        const isPrivate = !(['/deploy_beta', '/deploy_stable', '/deploy_pr'].includes(command));
         const skipBuild = command === '/update_sdk';
-        const outputChatId = isPrivate ? (buildType === 'alpha' ? ALPHA_CHAT_ID : ADMIN_USER_ID) : BETA_CHAT_ID;
+        const outputChatId = command === '/deploy_pr' ? PR_CHAT_ID : isPrivate ? (buildType === 'alpha' ? ALPHA_CHAT_ID : ADMIN_USER_ID) : BETA_CHAT_ID;
         const buildId = nextBuildId();
         const isSetup = '/checkout' === command;
 
@@ -1335,7 +1337,7 @@ function processPrivateCommand (botId, bot, msg, command, commandArgsRaw) {
           version: _version,
           git: _gitData,
           serviceChatId: msg.chat.id,
-          googlePlayTrack: buildType === 'stable' ? 'production' : buildType === 'beta' || buildType === 'alpha' ? buildType : null,
+          googlePlayTrack: buildType === 'stable' ? 'production' : ['beta', 'alpha'].includes(buildType) ? buildType : null,
           files: {}
         };
         if (pullRequestsMetadata && pullRequestsMetadata.length) {
@@ -2280,7 +2282,7 @@ function messageCallback (botId, bot, msg) {
     }
   }
 
-  if (botId === 'public' && (msg.chat.username == null || msg.chat.username !== BETA_CHAT_ID)) {
+  if (botId === 'public' && (msg.chat.username == null || ![BETA_CHAT_ID, PR_CHAT_ID].includes(msg.chat.username))) {
     try {
       const success = processPublicCommand(botId, bot, msg, command, commandArgs);
       if (success) {
