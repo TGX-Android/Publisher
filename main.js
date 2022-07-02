@@ -328,15 +328,15 @@ function getLocalChanges (callback) {
   });
 }
 
-function fetchHttp (url, needBinary) {
+function fetchHttp (url, needBinary, httpOptions) {
   return new Promise((accept, reject) => {
     const parsed = new URL(url);
     const protocol = (parsed.protocol === 'https:' ? https : http);
     try {
-      protocol.get({
+      protocol.get(Object.assign({
         host: parsed.host,
         path: parsed.pathname + parsed.search
-      }, (res) => {
+      }, httpOptions || {}), (res) => {
         toUtf8(res, (contentType, content) => {
           accept({statusCode: res.statusCode, statusMessage: res.statusMessage, content, contentType});
         }, needBinary);
@@ -1426,7 +1426,11 @@ function processPrivateCommand (botId, bot, msg, command, commandArgsRaw) {
               const pullRequest = build.pullRequests[pullRequestId];
               const infoUrl = build.git.remoteUrl.replace(/(?<=(^https?:\/\/))github\.com(?=\/)/gi, 'api.github.com/repos') + '/commits/' + pullRequest.commit.long;
               const url = new URL(infoUrl);
-              fetchHttp(url).then((response) => {
+              fetchHttp(url, false, {
+                headers: {
+                  'User-Agent': 'Telegram-X-Publisher'
+                }
+              }).then((response) => {
                 if (response.statusCode < 200 || response.statusCode >= 300) {
                   console.log('fetchHttp failed', response.statusCode, response.statusMessage, response.contentType, response.content);
                   callback(1);
