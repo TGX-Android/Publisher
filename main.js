@@ -1480,7 +1480,7 @@ function processPrivateCommand (botId, bot, msg, command, commandArgsRaw) {
                 const prIds = build.pullRequestsMetadata.map((pullRequestMetadata) => pullRequestMetadata.id);
                 const prAuthors = [... new Set(build.pullRequestsMetadata.map((pullRequestMetadata) => {
                   const pullRequest = build.pullRequests[pullRequestMetadata.id];
-                  return pullRequest.author;
+                  return pullRequest.github ? pullRequest.github.name : pullRequest.author;
                 }).filter((author) => author && author.length))];
                 if (commandArgs.contest) {
                   if (prAuthors.length !== 1) {
