@@ -214,6 +214,10 @@ function ucfirst (str) {
   return str && str.length ? str.charAt(0).toUpperCase() + str.substring(1) : str;
 }
 
+function escapeRegExp (string) {
+  return string.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+}
+
 function empty (obj) {
   if (typeof obj === 'object') {
     for (const key in obj) {
@@ -640,7 +644,7 @@ function getBuildFiles (build, variant, callback) {
     }
   };
 
-  const prefix = '^Telegram-X-' + build.version.name.replace(/\./gi, '\\.') + '(?:\\+[0-9,]+)?' + (architecture ? '(?:-' + architecture + ')?' : '') ;
+  const prefix = '^' + escapeRegExp(build.outputApplication.name || 'Telegram X').replace(/ /gi, '-') + '-' + build.version.name.replace(/\./gi, '\\.') + '(?:\\+[0-9,]+)?' + (architecture ? '(?:-' + architecture + ')?' : '') ;
   fs.exists(nativeDebugSymbolsFile, (exists) => {
     result.nativeDebugSymbolsFile = exists ? {path: nativeDebugSymbolsFile} : null;
     check();
@@ -690,6 +694,8 @@ function getBuildFiles (build, variant, callback) {
 }
 
 function getFromToCommit (build) {
+  if (build.outputApplication && build.outputApplication.isPRBuild)
+    return null;
   if (build.googlePlayTrack) {
     if (build.previousGooglePlayBuild &&
         build.previousGooglePlayBuild.remoteUrl === build.git.remoteUrl) {
@@ -1386,37 +1392,38 @@ function processPrivateCommand (botId, bot, msg, command, commandArgsRaw) {
           name: 'refreshInfo',
           act: (task, callback) => {
             getGitData((newGitData) => {
-              if (newGitData) {
-                build.git = newGitData;
-                getAppVersion(async (newVersion) => {
-                  if (newVersion) {
-                    build.version = newVersion;
-                    const previousGooglePlayBuild = await findPublishedGooglePlayBuild(build);
-                    const previousTelegramBuild = await findPublishedTelegramBuild(build);
-                    if (
-                      (previousGooglePlayBuild && previousGooglePlayBuild.version.code >= build.version.code) ||
-                      (previousTelegramBuild && previousTelegramBuild.version.code >= build.version.code)
-                    ) {
-                      task.logPrivately(
-                        'Version bump required. Current: ' + build.version.code +
-                        ', previous: ' + Math.max(
-                          previousGooglePlayBuild ? previousGooglePlayBuild.version.code : 0,
-                          previousTelegramBuild ? previousTelegramBuild.version.code : 0
-                        )
-                      );
-                      callback(1);
-                    } else {
-                      build.previousTelegramBuild = previousTelegramBuild;
-                      build.previousGooglePlayBuild = previousGooglePlayBuild;
-                      callback(0);
-                    }
-                  } else {
-                    callback(1);
-                  }
-                });
-              } else {
+              if (!newGitData) {
                 callback(1);
+                return;
               }
+              build.git = newGitData;
+
+              getAppVersion(async (newVersion) => {
+                if (!newVersion) {
+                  callback(1);
+                  return;
+                }
+                build.version = newVersion;
+                const previousGooglePlayBuild = await findPublishedGooglePlayBuild(build);
+                const previousTelegramBuild = await findPublishedTelegramBuild(build);
+                if (
+                  (previousGooglePlayBuild && previousGooglePlayBuild.version.code >= build.version.code) ||
+                  (previousTelegramBuild && previousTelegramBuild.version.code >= build.version.code)
+                ) {
+                  task.logPrivately(
+                    'Version bump required. Current: ' + build.version.code +
+                    ', previous: ' + Math.max(
+                      previousGooglePlayBuild ? previousGooglePlayBuild.version.code : 0,
+                      previousTelegramBuild ? previousTelegramBuild.version.code : 0
+                    )
+                  );
+                  callback(1);
+                  return;
+                }
+                build.previousTelegramBuild = previousTelegramBuild;
+                build.previousGooglePlayBuild = previousGooglePlayBuild;
+                callback(0);
+              });
             });
           }
         };
@@ -1512,10 +1519,17 @@ function processPrivateCommand (botId, bot, msg, command, commandArgsRaw) {
                   }
                 }
               }
+              const isExperimental = (appId !== settings.app.id || !!commandArgs.experimental);
               properties +=
                 'app.id=' + appId + '\n' +
                 'app.name=' + appName + '\n' +
-                'app.experimental=' + (appId !== settings.app.id || !!commandArgs.experimental) + '\n';
+                'app.experimental=' + isExperimental + '\n';
+              build.outputApplication = {
+                id: appId,
+                name: appName,
+                experimental: isExperimental,
+                isPRBuild
+              };
               fs.writeFile(settings.TGX_SOURCE_PATH + '/local.properties',
                 properties,
                 'utf-8',
@@ -1618,6 +1632,12 @@ function processPrivateCommand (botId, bot, msg, command, commandArgsRaw) {
                   callback(1);
                   return;
                 }
+                build.outputApplication = {
+                  id: getProperty(data, 'app.id') || settings.app.id,
+                  name: getProperty(data, 'app.name') || settings.app.name,
+                  experimental: getProperty(data, 'app.experimental') === 'true',
+                  isPRBuild
+                };
                 let prIds = getProperty(data, 'pr.ids');
                 if (prIds) {
                   prIds = prIds.split(',').map((id) => parseInt(id)).filter((id) => id > 0).sort();
