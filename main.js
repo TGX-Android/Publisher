@@ -1137,6 +1137,9 @@ function toDisplayPullRequestList (build) {
       text += ' / <a href="' + pullRequestUrl + '/files/' + pullRequest.commit.long + '">' + pullRequest.commit.short + '</a>';
       if (pullRequest.github) {
         text += ' by <a href="' + (pullRequest.github.url || 'https://github.com/' + pullRequest.github.name) + '">' + pullRequest.github.name + '</a>';
+        if (Math.max(pullRequest.github.additions || pullRequest.github.deletions) > 0) {
+          text += ' (<code>' + [pullRequest.github.additions, -pullRequest.github.deletions].filter((item) => item !== 0).map((item) => item > 0 ? '+' + item : item.toString()) + '</code>)'
+        }
       }
     } else if (pullRequestCommit) {
       text += ' / <a href="' + pullRequestUrl + '/files/' + pullRequestCommit + '">' + pullRequestCommit + '</a>';
@@ -1447,7 +1450,9 @@ function processPrivateCommand (botId, bot, msg, command, commandArgsRaw) {
                 const pullRequest = build.pullRequests[pullRequestId];
                 pullRequest.github = {
                   name: author,
-                  url: authorUrl
+                  url: authorUrl,
+                  additions: githubInfo.additions || 0,
+                  deletions: githubInfo.deletions || 0
                 };
                 callback(0);
               }).catch((e) => {
@@ -1496,8 +1501,12 @@ function processPrivateCommand (botId, bot, msg, command, commandArgsRaw) {
                   }
                   properties += 'pr.' + pullRequestId + '.commit_short=' + pullRequest.commit.short + '\n';
                   properties += 'pr.' + pullRequestId + '.commit_long=' + pullRequest.commit.long + '\n';
-                  properties += 'pr.' + pullRequestId + '.author=' + pullRequest.github.name + '\n';
-                  properties += 'pr.' + pullRequestId + '.author_url=' + pullRequest.github.url + '\n';
+                  if (pullRequest.github) {
+                    properties += 'pr.' + pullRequestId + '.author=' + pullRequest.github.name + '\n';
+                    properties += 'pr.' + pullRequestId + '.author_url=' + pullRequest.github.url + '\n';
+                    properties += 'pr.' + pullRequestId + '.additions=' + pullRequest.github.additions + '\n';
+                    properties += 'pr.' + pullRequestId + '.deletions=' + pullRequest.github.deletions + '\n';
+                  }
                   if (pullRequest.date) {
                     properties += 'pr.' + pullRequestId + '.date=' + pullRequest.date + '\n';
                   }
