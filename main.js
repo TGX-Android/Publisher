@@ -1429,8 +1429,7 @@ function processPrivateCommand (botId, bot, msg, command, commandArgsRaw) {
           return {
             name: 'fetchGithubDetails',
             act: (task, callback) => {
-              const pullRequest = build.pullRequests[pullRequestId];
-              const infoUrl = build.git.remoteUrl.replace(/(?<=(^https?:\/\/))github\.com(?=\/)/gi, 'api.github.com/repos') + '/commits/' + pullRequest.commit.long;
+              const infoUrl = build.git.remoteUrl.replace(/(?<=(^https?:\/\/))github\.com(?=\/)/gi, 'api.github.com/repos') + '/pulls/' + pullRequestId;
               const url = new URL(infoUrl);
               fetchHttp(url, false, {
                 headers: {
@@ -1443,8 +1442,8 @@ function processPrivateCommand (botId, bot, msg, command, commandArgsRaw) {
                   return;
                 }
                 const githubInfo = JSON.parse(response.content);
-                const author = githubInfo.author.login;
-                const authorUrl = githubInfo.author.html_url;
+                const author = githubInfo.user.login;
+                const authorUrl = githubInfo.user.html_url;
                 const pullRequest = build.pullRequests[pullRequestId];
                 pullRequest.github = {
                   name: author,
