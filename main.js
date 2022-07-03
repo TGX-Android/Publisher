@@ -1574,7 +1574,7 @@ function processPrivateCommand (botId, bot, msg, command, commandArgsRaw) {
               const preparePrTask = {
                 name: 'fetchPr-' + pullRequestId + (pullRequest.commit ? ':' + pullRequest.commit : ''),
                 cmd: '(git branch -D pr-' + pullRequestId + ' || true) && \
-                      git fetch origin pull/' + pullRequestId + '/head:pr-' + pullRequestId + ' && \
+                      (git fetch -f origin pull/' + pullRequestId + '/head:pr-' + pullRequestId + ' || git rev-parse --quiet --verify pr-' + pullRequestId + ') && \
                       ' + (isSecondary ? 'git stash &&' : '') + ' \
                       git checkout pr-' + pullRequestId + (
                         pullRequest.commit ? ' && \
