@@ -644,7 +644,7 @@ function getBuildFiles (build, variant, callback) {
     }
   };
 
-  const prefix = '^' + escapeRegExp(build.outputApplication.name || 'Telegram X').replace(/ /gi, '-') + '-' + build.version.name.replace(/\./gi, '\\.') + '(?:\\+[0-9,]+)?' + (architecture ? '(?:-' + architecture + ')?' : '') ;
+  const prefix = '^' + escapeRegExp(build.outputApplication.name || 'Telegram X').replace(/ /g, '-').replace(/#/g, '') + '-' + build.version.name.replace(/\./gi, '\\.') + '(?:\\+[0-9,]+)?' + (architecture ? '(?:-' + architecture + ')?' : '') ;
   fs.exists(nativeDebugSymbolsFile, (exists) => {
     result.nativeDebugSymbolsFile = exists ? {path: nativeDebugSymbolsFile} : null;
     check();
