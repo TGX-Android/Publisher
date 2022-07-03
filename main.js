@@ -1406,10 +1406,10 @@ function processPrivateCommand (botId, bot, msg, command, commandArgsRaw) {
                 build.version = newVersion;
                 const previousGooglePlayBuild = await findPublishedGooglePlayBuild(build);
                 const previousTelegramBuild = await findPublishedTelegramBuild(build);
-                if (
+                if (!isPRBuild && (
                   (previousGooglePlayBuild && previousGooglePlayBuild.version.code >= build.version.code) ||
                   (previousTelegramBuild && previousTelegramBuild.version.code >= build.version.code)
-                ) {
+                )) {
                   task.logPrivately(
                     'Version bump required. Current: ' + build.version.code +
                     ', previous: ' + Math.max(
