@@ -1122,6 +1122,10 @@ function sendArray (bot, chatId, array, parseMode, delimiter) {
   }
 }
 
+function sleep (milliseconds) {
+  return new Promise(resolve => setTimeout(resolve, milliseconds))
+}
+
 function toDisplayDate (seconds) {
   return new Date(seconds * 1000).toLocaleString('en-GB', {
     day: 'numeric',
@@ -1839,7 +1843,7 @@ function processPrivateCommand (botId, bot, msg, command, commandArgsRaw) {
             result += '\n\n' + commandArgsRaw.trim();
           }
           result += '\n\n';
-          if (build.endTime && !build.error && isPublic) {
+          if (build.endTime && !build.error && isPublic && !build.aborted) {
             if (build.googlePlayTrack === 'alpha' || build.googlePlayTrack === 'beta') {
               result += 'Google Play <b>' + (build.googlePlayTrack === 'beta' ? '<a href="' + TESTING_URL + '">' : '') + build.googlePlayTrack + (build.googlePlayTrack === 'beta' ? '</a>' : '') + '</b> will be available within an hour.\n';
             } else if (build.googlePlayTrack === 'production') {
@@ -1861,7 +1865,7 @@ function processPrivateCommand (botId, bot, msg, command, commandArgsRaw) {
             } else {
               result += 'You can find <b>APKs</b> below.';
             }
-          } else if (build.endTime && build.error && isPublic) {
+          } else if (build.endTime && (build.error || build.aborted) && isPublic) {
             result += 'Another attempt might be made soon.';
           } else {
             for (let i = 0; i < build.tasks.length; i++) {
@@ -1919,7 +1923,7 @@ function processPrivateCommand (botId, bot, msg, command, commandArgsRaw) {
           }
           return result;
         };
-        build.updateMessage = async () => {
+        build.updateMessage = async (isFinal) => {
           if (build.publicChatId && build.publicMessageId) {
             const text = build.asString(true);
             let params = {
@@ -1934,6 +1938,21 @@ function processPrivateCommand (botId, bot, msg, command, commandArgsRaw) {
                 await bot.editMessageText(text, params);
               } catch (e) {
                 console.error('Cannot update message', JSON.stringify(params), e);
+                if (isFinal) {
+                  let timeout = 0;
+                  let success = false;
+                  let retryCount = 10;
+                  do {
+                    timeout += 1500;
+                    await sleep(Math.min(10000, timeout));
+                    try {
+                      await bot.editMessageText(text, params);
+                      success = true;
+                    } catch (e) {
+                      console.error('Cannot retry update message', JSON.stringify(params), e, retryCount);
+                    }
+                  } while (!success && --retryCount > 0);
+                }
               }
             }
           }
@@ -1980,7 +1999,7 @@ function processPrivateCommand (botId, bot, msg, command, commandArgsRaw) {
           }
           console.log('Aborting build ' + build.version.name);
           build.aborted = true;
-          await build.updateMessage();
+          await build.updateMessage(true);
           if (build.publicMessages) {
             // Deleting APKs
             for (let i = 0; i < build.publicMessages.length; i++) {
@@ -2003,7 +2022,7 @@ function processPrivateCommand (botId, bot, msg, command, commandArgsRaw) {
               task.interrupted = true;
               if (task.process) {
                 await killTask(task);
-                await build.updateMessage();
+                await build.updateMessage(true);
               } else if (task.cancel) {
                 await task.cancel();
               }
@@ -2012,8 +2031,8 @@ function processPrivateCommand (botId, bot, msg, command, commandArgsRaw) {
           }
           build.after(after);
         };
-        build.cleanup = () => {
-          build.updateMessage();
+        build.cleanup = async () => {
+          await build.updateMessage(true);
           if (cur.pending_build && cur.pending_build.id === build.id) {
             cur.pending_build = null;
           }
@@ -2128,10 +2147,15 @@ function processPrivateCommand (botId, bot, msg, command, commandArgsRaw) {
             build.aborted = false;
           }
           build.endTime = new Date();
-          build.cleanup();
-          if (build.publicChatId && build.publicMessageId && !(build.aborted || build.error)) {
-            bot.pinChatMessage(build.publicChatId, build.publicMessageId);
-          }
+          build.cleanup().then(async () => {
+            if (build.publicChatId && build.publicMessageId && !(build.aborted || build.error)) {
+              try {
+                await bot.pinChatMessage(build.publicChatId, build.publicMessageId);
+              } catch (e) {
+                console.log('Cannot pin chat message', e);
+              }
+            }
+          });
 
           traceDuration('build_stat', build.type, build.startTime, build.endTime, !haveErrors);
           if (build.invokeAfter) {
