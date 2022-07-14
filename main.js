@@ -1524,10 +1524,12 @@ function processPrivateCommand (botId, bot, msg, command, commandArgsRaw) {
                 }
               }
               const isExperimental = (appId !== settings.app.id || !!commandArgs.experimental);
+              const dontObfuscate = !!commandArgs.dontobfuscate;
               properties +=
                 'app.id=' + appId + '\n' +
                 'app.name=' + appName + '\n' +
-                'app.experimental=' + isExperimental + '\n';
+                'app.experimental=' + isExperimental + '\n' +
+                'app.dontobfuscate=' + dontObfuscate + '\n';
               build.outputApplication = {
                 id: appId,
                 name: appName,
