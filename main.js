@@ -635,7 +635,7 @@ function getBuildFiles (build, variant, callback) {
 
   const check = () => {
     if (result.nativeDebugSymbolsFile !== undefined && result.apkFile !== undefined && (result.apkFile === null || (result.apkFile.checksum && result.apkFile.checksum.md5 !== undefined && result.apkFile.checksum.sha1 !== undefined && result.apkFile.checksum.sha256 !== undefined)) && result.mappingFile !== undefined && result.metadata !== undefined) {
-      if (result.nativeDebugSymbolsFile && result.apkFile && (result.apkFile.checksum && result.apkFile.checksum.sha256 && result.apkFile.checksum.sha1 && result.apkFile.checksum.md5) && result.mappingFile && result.metadata) {
+      if (result.nativeDebugSymbolsFile && result.apkFile && (result.apkFile.checksum && result.apkFile.checksum.sha256 && result.apkFile.checksum.sha1 && result.apkFile.checksum.md5) && (result.mappingFile || build.outputApplication.dontObfuscate) && result.metadata) {
         callback(result);
       } else {
         console.error('Cannot find build files for #' + build.version.name, JSON.stringify(result));
@@ -1534,6 +1534,7 @@ function processPrivateCommand (botId, bot, msg, command, commandArgsRaw) {
                 id: appId,
                 name: appName,
                 experimental: isExperimental,
+                dontObfuscate,
                 isPRBuild
               };
               fs.writeFile(settings.TGX_SOURCE_PATH + '/local.properties',
@@ -1645,6 +1646,7 @@ function processPrivateCommand (botId, bot, msg, command, commandArgsRaw) {
                   id: getProperty(data, 'app.id') || settings.app.id,
                   name: getProperty(data, 'app.name') || settings.app.name,
                   experimental: getProperty(data, 'app.experimental') === 'true',
+                  dontObfuscate: getProperty(data, 'app.dontobfuscate') === 'true',
                   isPRBuild
                 };
                 let prIds = getProperty(data, 'pr.ids');
