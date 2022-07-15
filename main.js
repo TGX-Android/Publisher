@@ -1497,7 +1497,7 @@ function processPrivateCommand (botId, bot, msg, command, commandArgsRaw) {
                 const prIds = build.pullRequestsMetadata.map((pullRequestMetadata) => pullRequestMetadata.id);
                 const prAuthors = [... new Set(build.pullRequestsMetadata.map((pullRequestMetadata) => {
                   const pullRequest = build.pullRequests[pullRequestMetadata.id];
-                  return pullRequest.github ? pullRequest.github.name : pullRequest.author;
+                  return pullRequest.github.name;
                 }).filter((author) => author && author.length))];
                 if (commandArgs.contest) {
                   if (prAuthors.length !== 1) {
@@ -1606,7 +1606,6 @@ function processPrivateCommand (botId, bot, msg, command, commandArgsRaw) {
                     if (newGitData) {
                       build.pullRequests[pullRequestId] = {
                         commit: newGitData.commit,
-                        author: newGitData.author,
                         date: newGitData.date
                       };
                       callback(0);
@@ -1674,8 +1673,13 @@ function processPrivateCommand (botId, bot, msg, command, commandArgsRaw) {
                       short: getProperty(data, 'pr.' + pullRequestId + '.commit_short'),
                       long: getProperty(data, 'pr.' + pullRequestId + '.commit_long'),
                     },
-                    author: getProperty(data, 'pr.' + pullRequestId + '.author'),
-                    date: getProperty(data, 'pr.' + pullRequestId + '.date')
+                    date: getProperty(data, 'pr.' + pullRequestId + '.date'),
+                    github: {
+                      name: getProperty(data, 'pr.' + pullRequestId + '.author'),
+                      url: getProperty(data, 'pr.' + pullRequestId + '.author_url'),
+                      additions: parseInt(getProperty(data, 'pr.' + pullRequestId + '.additions')) || 0,
+                      deletions: parseInt(getProperty(data, 'pr.' + pullRequestId + '.deletions')) || 0
+                    }
                   }
                 }
                 build.pullRequestsMetadata = prIds.map((id) => {
