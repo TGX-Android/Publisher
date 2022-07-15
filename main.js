@@ -1140,15 +1140,17 @@ function toDisplayDate (seconds) {
 
 function toDisplayPullRequestList (build) {
   const remoteUrl = build.remoteUrl || (build.git ? build.git.remoteUrl : '');
-  const toItem = (pullRequestId, pullRequestCommit, pullRequest) => {
+  const toItem = (pullRequestId, pullRequestCommit, pullRequest, nextPullRequest) => {
     const pullRequestUrl = remoteUrl + '/pull/' + pullRequestId;
     let text = '<a href="' + pullRequestUrl + '"><b>' + pullRequestId + '</b></a>';
     if (pullRequest) {
       text += ' / <a href="' + pullRequestUrl + '/files/' + pullRequest.commit.long + '">' + pullRequest.commit.short + '</a>';
       if (pullRequest.github) {
-        text += ' by <a href="' + (pullRequest.github.url || 'https://github.com/' + pullRequest.github.name) + '">' + pullRequest.github.name + '</a>';
         if (Math.max(pullRequest.github.additions || pullRequest.github.deletions) > 0) {
           text += ' (<code>' + [pullRequest.github.additions, -pullRequest.github.deletions].filter((item) => item !== 0).map((item) => item > 0 ? '+' + item : item.toString()) + '</code>)'
+        }
+        if (!nextPullRequest || !nextPullRequest.github || nextPullRequest.github.name !== pullRequest.github.name) {
+          text += ' by <a href="' + (pullRequest.github.url || 'https://github.com/' + pullRequest.github.name) + '">' + pullRequest.github.name + '</a>';
         }
       }
     } else if (pullRequestCommit) {
@@ -1157,15 +1159,19 @@ function toDisplayPullRequestList (build) {
     return text;
   };
   if (build.pullRequestsMetadata) {
-    return build.pullRequestsMetadata.map((pullRequestMetadata) => {
+    return build.pullRequestsMetadata.map((pullRequestMetadata, index) => {
       const pullRequestId = pullRequestMetadata.id;
       const pullRequest = build.pullRequests ? build.pullRequests[pullRequestId] : null;
-      return toItem(pullRequestId, pullRequestMetadata.commit, pullRequest);
+      const nextPullRequestId = index + 1 < build.pullRequestsMetadata.length ? build.pullRequestsMetadata[index + 1].id : null;
+      const nextPullRequest = nextPullRequestId !== null ? build.pullRequests[nextPullRequestId] : null;
+      return toItem(pullRequestId, pullRequestMetadata.commit, pullRequest, nextPullRequest);
     }).join(', ');
   } else if (build.pullRequests) {
-    return Object.keys(build.pullRequests).map((pullRequestId) => {
+    const pullRequestIds = Object.keys(build.pullRequests);
+    return pullRequestIds.map((pullRequestId, index) => {
       const pullRequest = build.pullRequests[pullRequestId];
-      return toItem(parseInt(pullRequestId), null, pullRequest);
+      const nextPullRequest = index + 1 < pullRequestIds.length ? build.pullRequests[pullRequestIds[index + 1]] : null;
+      return toItem(parseInt(pullRequestId), null, pullRequest, nextPullRequest);
     }).join(', ');
   } else {
     return '';
