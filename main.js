@@ -134,8 +134,14 @@ if (platform === 'linux') {
 }
 let cpuSignature = cpuNames.join(', ') + ' @ ' + cpuCount + (cpuCount > 1 ? ' cores' : ' core') + (threadCount !== cpuCount ? ' (' + threadCount + ' threads)' : '');
 
-const server = spawn('telegram-bot-api',
-  ['--api-id=' + TELEGRAM_APP_ID, '--api-hash=' + TELEGRAM_APP_HASH, '--local', '--dir=' + process.cwd() + '/server'],
+let server = spawn('telegram-bot-api',
+  [
+    '--api-id=' + TELEGRAM_APP_ID,
+    '--api-hash=' + TELEGRAM_APP_HASH,
+    '--local',
+    '--dir=' + process.cwd() + '/server',
+    '--log=' + process.cwd() + '/server.log'
+  ],
   {detached: true}
 );
 server.stdout.on('data', (data) => {
@@ -148,7 +154,25 @@ server.stderr.on('data', (data) => {
     console.log('Server cries:', data);
   }
 });
+server.on('close', (code) => {
+  console.log(`server process exited with code ${code}`);
+  server = null;
+  if (!cur.exiting) {
+    process.kill(process.pid, 'SIGINT');
+  }
+});
 server.unref();
+
+function isOffline () {
+  return server !== null;
+}
+
+async function stopServer () {
+  console.log('Killing server…', isOffline());
+  if (!isOffline()) {
+    server.kill('SIGTERM');
+  }
+}
 
 // Wait for the server
 Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, 1000);
@@ -2433,6 +2457,7 @@ bot.on('chosen_inline_result', (result) => {
 });*/
 
 async function onExit (signal, arg1, arg2, callback) {
+  cur.exiting = true;
   if (cur.pending_build && cur.pending_build.abort) {
     console.log('Aborting current build manually…');
     cur.pending_build.abort(() => {
@@ -2440,11 +2465,12 @@ async function onExit (signal, arg1, arg2, callback) {
     });
     return;
   }
-  try {
-    await botMap['private'].sendMessage(ADMIN_USER_ID, 'Bot stopped.');
-  } catch (ignored) {}
-  console.log('Killing server…');
-  server.kill('SIGTERM');
+  if (!isOffline()) {
+    try {
+      await botMap['private'].sendMessage(ADMIN_USER_ID, 'Bot stopped.');
+    } catch (ignored) {}
+  }
+  await stopServer();
   await db.close();
   callback();
 }
@@ -2455,7 +2481,9 @@ async function onExit (signal, arg1, arg2, callback) {
     if (signal === 'unhandledRejection')
       return;
 
-    botMap['private'].sendMessage(ADMIN_USER_ID, '*' + signal + '* received, bot is stopping\\.\\.\\.', {parse_mode: 'MarkdownV2'}).catch(onGlobalError);
+    if (!isOffline()) {
+      botMap['private'].sendMessage(ADMIN_USER_ID, '*' + signal + '* received, bot is stopping\\.\\.\\.', {parse_mode: 'MarkdownV2'}).catch(onGlobalError);
+    }
 
     onExit(signal, arg1, arg2, () => {
       process.exit(signal === 'uncaughtException' || signal === 'unhandledRejection' ? 1 : 0);
