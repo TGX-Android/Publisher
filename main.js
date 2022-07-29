@@ -146,7 +146,8 @@ const cur = {
   server: null
 };
 
-function runServer (onClose) {
+function runServer (onClose, detached) {
+  detached = !!detached;
   const server = spawn('telegram-bot-api',
     [
       '--api-id=' + TELEGRAM_APP_ID,
@@ -156,7 +157,7 @@ function runServer (onClose) {
       '--log=' + process.cwd() + '/server.log',
       '--verbosity=' + (settings.server_verbosity || 1)
     ],
-    {detached: true}
+    {detached}
   );
   server.stdout.on('data', (data) => {
     if (LOCAL) {
@@ -174,7 +175,9 @@ function runServer (onClose) {
       onClose(server);
     }
   });
-  server.unref();
+  if (detached) {
+    server.unref();
+  }
   return server;
 }
 
