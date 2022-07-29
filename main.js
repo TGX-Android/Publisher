@@ -39,10 +39,6 @@ function globalErrorHandler () {
   };
 }
 
-function onGlobalError (error) {
-  globalErrorHandler()(error);
-}
-
 // ARGV CONSTANTS
 
 function checkPath (path) {
@@ -157,7 +153,8 @@ function runServer (onClose) {
       '--api-hash=' + TELEGRAM_APP_HASH,
       '--local',
       '--dir=' + process.cwd() + '/server',
-      '--log=' + process.cwd() + '/server.log'
+      '--log=' + process.cwd() + '/server.log',
+      '--verbosity=' + (settings.server_verbosity || 1)
     ],
     {detached: true}
   );
@@ -845,7 +842,7 @@ function publishToTelegram (bot, task, build, onDone, chatId, onlyPrivate, disab
       }
     }).catch((error) => {
       onDone(1);
-      onGlobalError(error);
+      globalErrorHandler()(error);
     });
   } else if (docs.length === 1) {
     bot.sendDocument(chatId, docs[0].media, {
@@ -872,7 +869,7 @@ function publishToTelegram (bot, task, build, onDone, chatId, onlyPrivate, disab
       }
     }).catch((error) => {
       onDone(1);
-      onGlobalError(error);
+      globalErrorHandler()(error);
     });
   } else {
     onDone(0);
