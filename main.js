@@ -2389,6 +2389,15 @@ function processPublicCommand (botId, bot, msg, command, commandArgs) {
 function messageCallback (botId, bot, msg) {
   if (msg.chat.type !== 'private')
     return;
+
+  if (msg.from && msg.from.is_bot) {
+    console.error('Received message from bot',
+      'from:', JSON.stringify(msg.from),
+      'chat:', JSON.stringify(msg.chat),
+      'text:', msg.text || 'null'
+    );
+    return;
+  }
   
   storeObject('user', msg.from);
   storeObject('user', msg.forward_from);
