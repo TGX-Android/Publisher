@@ -32,8 +32,15 @@ const { google } = require('googleapis');
 
 // ERROR
 
+function globalErrorHandler () {
+  const stack = new Error('Global error happened here:').stack;
+  return (error) => {
+    console.log(error.code, stack, error);
+  };
+}
+
 function onGlobalError (error) {
-  console.error('Fatal bot error', error);
+  globalErrorHandler()(error);
 }
 
 // ARGV CONSTANTS
@@ -134,43 +141,66 @@ if (platform === 'linux') {
 }
 let cpuSignature = cpuNames.join(', ') + ' @ ' + cpuCount + (cpuCount > 1 ? ' cores' : ' core') + (threadCount !== cpuCount ? ' (' + threadCount + ' threads)' : '');
 
-let server = spawn('telegram-bot-api',
-  [
-    '--api-id=' + TELEGRAM_APP_ID,
-    '--api-hash=' + TELEGRAM_APP_HASH,
-    '--local',
-    '--dir=' + process.cwd() + '/server',
-    '--log=' + process.cwd() + '/server.log'
-  ],
-  {detached: true}
-);
-server.stdout.on('data', (data) => {
-  if (LOCAL) {
-    console.log('Server says:', data);
+const cur = {
+  cache: {},
+  build_no: -1,
+  pending_build: null,
+  uploaded_version: -1,
+  killServer: false,
+  server: null
+};
+
+function runServer (onClose) {
+  const server = spawn('telegram-bot-api',
+    [
+      '--api-id=' + TELEGRAM_APP_ID,
+      '--api-hash=' + TELEGRAM_APP_HASH,
+      '--local',
+      '--dir=' + process.cwd() + '/server',
+      '--log=' + process.cwd() + '/server.log'
+    ],
+    {detached: true}
+  );
+  server.stdout.on('data', (data) => {
+    if (LOCAL) {
+      console.log('Server says:', data);
+    }
+  });
+  server.stderr.on('data', (data) => {
+    if (LOCAL) {
+      console.log('Server cries:', data);
+    }
+  });
+  server.on('close', (code) => {
+    console.log(`Server process exited with code ${code}`);
+    if (onClose) {
+      onClose(server);
+    }
+  });
+  server.unref();
+  return server;
+}
+
+cur.server = runServer((closedServer) => {
+  if (cur.server === closedServer) {
+    console.error('Server closed, quitting process', cur.exiting);
+    cur.server = null;
+    if (!cur.exiting) {
+      process.kill(process.pid, 'SIGINT');
+    }
+  } else {
+    console.error('Unknown server closed');
   }
 });
-server.stderr.on('data', (data) => {
-  if (LOCAL) {
-    console.log('Server cries:', data);
-  }
-});
-server.on('close', (code) => {
-  console.log(`server process exited with code ${code}`);
-  server = null;
-  if (!cur.exiting) {
-    process.kill(process.pid, 'SIGINT');
-  }
-});
-server.unref();
 
 function isOffline () {
-  return server !== null;
+  return cur.server === null;
 }
 
 async function stopServer () {
   console.log('Killing server…', isOffline());
   if (!isOffline()) {
-    server.kill('SIGTERM');
+    cur.server.kill('SIGTERM');
   }
 }
 
@@ -201,14 +231,6 @@ const botMap = {};
 bots.forEach((bot) => {
   botMap[bot.id] = bot.bot;
 });
-
-const cur = {
-  cache: {},
-  build_no: -1,
-  pending_build: null,
-  uploaded_version: -1,
-  killServer: false
-};
 
 function nextBuildId () {
   let id = cur.build_no ? cur.build_no + 1 : 1;
@@ -1120,7 +1142,7 @@ main();
 
 function sendArray (bot, chatId, array, parseMode, delimiter) {
   if (!array || !array.length) {
-    bot.sendMessage(chatId, '<b>Nothing found!</b>', {parse_mode: 'HTML'}).catch(onGlobalError);
+    bot.sendMessage(chatId, '<b>Nothing found!</b>', {parse_mode: 'HTML'}).catch(globalErrorHandler());
     return;
   }
   if (!delimiter) {
@@ -1131,7 +1153,7 @@ function sendArray (bot, chatId, array, parseMode, delimiter) {
   while (remaining > 0) {
     const item = array[array.length - remaining];
     if (text.length + item.length + (text.length ? delimiter.length : 0) > 4000) {
-      bot.sendMessage(chatId, text, {parse_mode: parseMode}).catch(onGlobalError);
+      bot.sendMessage(chatId, text, {parse_mode: parseMode}).catch(globalErrorHandler());
       text = item;
     } else {
       if (text.length) {
@@ -1141,7 +1163,7 @@ function sendArray (bot, chatId, array, parseMode, delimiter) {
     }
     remaining--;
     if (remaining == 0) {
-      bot.sendMessage(chatId, text, {parse_mode: parseMode}).catch(onGlobalError);
+      bot.sendMessage(chatId, text, {parse_mode: parseMode}).catch(globalErrorHandler());
     }
   }
 }
@@ -1215,13 +1237,13 @@ function processPrivateCommand (botId, bot, msg, command, commandArgsRaw) {
       if (commandArgsRaw) {
         db.get(commandArgsRaw, {valueEncoding: 'json'}, (err, value) => {
           if (err) {
-            bot.sendMessage(msg.chat.id, '*Key not found!*', {parse_mode: 'MarkdownV2'}).catch(onGlobalError);
+            bot.sendMessage(msg.chat.id, '*Key not found!*', {parse_mode: 'MarkdownV2'}).catch(globalErrorHandler());
           } else {
-            bot.sendMessage(msg.chat.id, '<code>' + JSON.stringify(value) + '</code>', {parse_mode: 'HTML'}).catch(onGlobalError);
+            bot.sendMessage(msg.chat.id, '<code>' + JSON.stringify(value) + '</code>', {parse_mode: 'HTML'}).catch(globalErrorHandler());
           }
         });
       } else {
-        bot.sendMessage(msg.chat.id, 'Key not specified.').catch(onGlobalError);
+        bot.sendMessage(msg.chat.id, 'Key not specified.').catch(globalErrorHandler());
       }
       break;
     }
@@ -1249,7 +1271,7 @@ function processPrivateCommand (botId, bot, msg, command, commandArgsRaw) {
     }
     case '/abort': {
       if (!cur.pending_build) {
-        bot.sendMessage(msg.chat.id, 'No build is in progress!').catch(onGlobalError);
+        bot.sendMessage(msg.chat.id, 'No build is in progress!').catch(globalErrorHandler());
         return;
       }
       cur.pending_build.abort();
@@ -1263,7 +1285,7 @@ function processPrivateCommand (botId, bot, msg, command, commandArgsRaw) {
           if (gitData.branch) {
             text += '\n<b>Branch</b>: <code>' + gitData.branch + '</code>';
           }
-          bot.sendMessage(msg.chat.id, text, {parse_mode: 'HTML'}).catch(onGlobalError);
+          bot.sendMessage(msg.chat.id, text, {parse_mode: 'HTML'}).catch(globalErrorHandler());
         });
       }, true);
       break;
@@ -1275,9 +1297,9 @@ function processPrivateCommand (botId, bot, msg, command, commandArgsRaw) {
     case '/changes': {
       getLocalChanges((changes) => {
         if (changes) {
-          bot.sendMessage(msg.chat.id, 'Current changes:\n\n<pre>' + escapeHtml(changes) + '</pre>', {parse_mode: 'HTML'}).catch(onGlobalError);
+          bot.sendMessage(msg.chat.id, 'Current changes:\n\n<pre>' + escapeHtml(changes) + '</pre>', {parse_mode: 'HTML'}).catch(globalErrorHandler());
         } else {
-          bot.sendMessage(msg.chat.id, 'No local changes found!').catch(onGlobalError);
+          bot.sendMessage(msg.chat.id, 'No local changes found!').catch(globalErrorHandler());
         }
       });
       break;
@@ -1285,7 +1307,7 @@ function processPrivateCommand (botId, bot, msg, command, commandArgsRaw) {
     case '/pull': {
       if (!cur.pending_build) {
         gitPull((log) => {
-          bot.sendMessage(msg.chat.id, '<code>' + log + '</code>', {parse_mode: 'HTML'}).catch(onGlobalError);
+          bot.sendMessage(msg.chat.id, '<code>' + log + '</code>', {parse_mode: 'HTML'}).catch(globalErrorHandler());
         });
       } else {
         bot.sendMessage(msg.chat.id, 'Cannot pull fresh code, as some build is in progress. Use /abort to cancel it.');
@@ -1308,23 +1330,23 @@ function processPrivateCommand (botId, bot, msg, command, commandArgsRaw) {
 
     case '/update_sdk': {
       if (cur.build_no === -1 || cur.uploaded_version === -1) {
-        bot.sendMessage(msg.chat.id, 'Please try again.').catch(onGlobalError);
+        bot.sendMessage(msg.chat.id, 'Please try again.').catch(globalErrorHandler());
         return;
       }
 
       if (LOCAL && command.startsWith('/deploy_')) {
-        bot.sendMessage(msg.chat.id, command + ' is unavailable when running locally.').catch(onGlobalError);
+        bot.sendMessage(msg.chat.id, command + ' is unavailable when running locally.').catch(globalErrorHandler());
         return;
       }
 
       getAppVersion((_version) => { getGitData((_gitData) => {
         if (!_version) {
-          bot.sendMessage(msg.chat.id, 'Cannot detect app version!').catch(onGlobalError);
+          bot.sendMessage(msg.chat.id, 'Cannot detect app version!').catch(globalErrorHandler());
           return;
         }
 
         if (cur.pending_build) {
-          bot.sendMessage(msg.chat.id, 'Another build is in progress! Abort with /abort').catch(onGlobalError);
+          bot.sendMessage(msg.chat.id, 'Another build is in progress! Abort with /abort').catch(globalErrorHandler());
           return;
         }
 
@@ -2217,7 +2239,7 @@ function processPrivateCommand (botId, bot, msg, command, commandArgsRaw) {
           }).then((message) => {
             build.serviceMessageId = message.message_id;
             build.updateMessage();
-          }).catch(onGlobalError);
+          }).catch(globalErrorHandler());
 
           if (build.publicChatId) {
             build.publicMessage = build.asString(true);
@@ -2228,7 +2250,7 @@ function processPrivateCommand (botId, bot, msg, command, commandArgsRaw) {
             }).then((message) => {
               build.publicMessageId = message.message_id;
               build.updateMessage();
-            }).catch(onGlobalError);
+            }).catch(globalErrorHandler());
           }
         });
       }); });
@@ -2242,7 +2264,7 @@ function processPrivateCommand (botId, bot, msg, command, commandArgsRaw) {
           escapeHtml(JSON.stringify(msg, null, 2)) +
         '</code></pre>',
         {parse_mode: 'HTML'}
-      ).catch(onGlobalError);
+      ).catch(globalErrorHandler());
       break;
     }
   }
@@ -2299,7 +2321,7 @@ function processPublicCommand (botId, bot, msg, command, commandArgs) {
           'You can send me <b>checksum</b> of an <b>APK file</b> you downloaded, and I can tell whether it corresponds to any <b>Telegram X</b> build I am aware of.\n\n' + 
           '<b>Note</b>: you can always grab a fresh APK from @tgx_log.',
           {parse_mode: 'HTML'}
-        ).catch(onGlobalError);
+        ).catch(globalErrorHandler());
       };
       if (commandArgs === 'crash') {
         // Do nothing. Wait for incoming crash file.
@@ -2309,7 +2331,7 @@ function processPublicCommand (botId, bot, msg, command, commandArgs) {
           'If you want to just write a public app review, you can leave it on <a href="' + MARKET_URL + '">Google Play</a>.\n\n' + 
           'Meanwhile you can send me <b>checksum</b> of an <b>APK file</b> you downloaded from anywhere, and I can tell whether it corresponds to any <b>Telegram X</b> build I am aware of.',
           {parse_mode: 'HTML'}
-        ).catch(onGlobalError);
+        ).catch(globalErrorHandler());
       } else if (matchChecksum(commandArgs)) {
         const checksum = matchChecksum(commandArgs);
         findApkByHash(checksum, (err, apk) => {
@@ -2317,14 +2339,14 @@ function processPublicCommand (botId, bot, msg, command, commandArgs) {
             bot.sendMessage(msg.chat.id,
               '<code>' + checksum + '</code> seems to be a hash, but it does not correspond to any <b>Telegram X</b> build I am aware of.',
               {parse_mode: 'HTML'/*, reply_to_message_id: msg.message_id*/}
-            ).catch(onGlobalError);
+            ).catch(globalErrorHandler());
           } else {
             bot.sendMessage(msg.chat.id, getChecksumMessage(checksum, apk, true),
               {
                 parse_mode: 'HTML',
                 disable_web_page_preview: true /*, reply_to_message_id: msg.message_id*/
               }
-            ).catch(onGlobalError);
+            ).catch(globalErrorHandler());
           }
         });
       } else {
@@ -2340,7 +2362,7 @@ function processPublicCommand (botId, bot, msg, command, commandArgs) {
             bot.sendMessage(msg.chat.id,
               'This hash does not correspond to any <b>Telegram X</b> I am aware of.',
               {parse_mode: 'HTML', reply_to_message_id: msg.message_id}
-            ).catch(onGlobalError);
+            ).catch(globalErrorHandler());
           } else {
             bot.sendMessage(msg.chat.id, getChecksumMessage(checksum, apk, false),
               {
@@ -2348,7 +2370,7 @@ function processPublicCommand (botId, bot, msg, command, commandArgs) {
                 disable_web_page_preview: true,
                 reply_to_message_id: msg.message_id
               }
-            ).catch(onGlobalError);
+            ).catch(globalErrorHandler());
           }
         });
         return true;
@@ -2358,7 +2380,7 @@ function processPublicCommand (botId, bot, msg, command, commandArgs) {
     bot.sendMessage(msg.chat.id,
       'Sorry, I can currently process only <b>checksums</b>, not files themselves.',
       {parse_mode: 'HTML', reply_to_message_id: msg.message_id}
-    ).catch(onGlobalError);
+    ).catch(globalErrorHandler());
     return (msg.document.file_name && msg.document.file_name.endsWith('.apk')) ||
       (msg.document.mime_type && msg.document.mime_type === APK_MIME_TYPE);
   }
@@ -2407,7 +2429,7 @@ function messageCallback (botId, bot, msg) {
   /*if (!msg.from || msg.from.id !== ADMIN_USER_ID) {
     bot.forwardMessage(ADMIN_USER_ID, msg.chat.id, msg.message_id).then((forwardedMessage) => {
       db.put('origin_' + botId + '_' + forwardedMessage.message_id, [msg.chat.id, msg.message_id], {valueEncoding: 'json'});
-    }).catch(onGlobalError);
+    }).catch(globalErrorHandler());
     return;
   }
   if (msg.chat.id === ADMIN_USER_ID && msg.reply_to_message) {
@@ -2418,7 +2440,7 @@ function messageCallback (botId, bot, msg) {
       let messageId = origin.length > 1 ? origin[1] : 0;
       bot.copyMessage(chatId, msg.chat.id, msg.message_id, {
         reply_to_message_id: messageId,
-      }).catch(onGlobalError);
+      }).catch(globalErrorHandler());
     });
     return;
   }*/
@@ -2444,9 +2466,9 @@ bots.forEach((bot) => {
   bot.bot.on('callback_query', (query) => queryCallback(bot.id, bot.bot, query));
   bot.bot.on('message', (msg) => messageCallback(bot.id, bot.bot, msg));
   bot.bot.on('channel_post', (msg) => messageCallback(bot.id, bot.bot, msg));
-  bot.bot.on('error', onGlobalError);
+  bot.bot.on('error', globalErrorHandler());
   bot.bot.on('polling_error', (error) => {
-    bot.bot.sendMessage(ADMIN_USER_ID, 'Polling error…\n' + error).catch(onGlobalError);
+    bot.bot.sendMessage(ADMIN_USER_ID, 'Polling error…\n' + error).catch(globalErrorHandler());
   });
 });
 /*bot.on('inline_query', (query) => {
@@ -2482,7 +2504,7 @@ async function onExit (signal, arg1, arg2, callback) {
       return;
 
     if (!isOffline()) {
-      botMap['private'].sendMessage(ADMIN_USER_ID, '*' + signal + '* received, bot is stopping\\.\\.\\.', {parse_mode: 'MarkdownV2'}).catch(onGlobalError);
+      botMap['private'].sendMessage(ADMIN_USER_ID, '*' + signal + '* received, bot is stopping\\.\\.\\.', {parse_mode: 'MarkdownV2'}).catch(globalErrorHandler());
     }
 
     onExit(signal, arg1, arg2, () => {
@@ -2517,4 +2539,4 @@ botMap['private'].sendMessage(ADMIN_USER_ID,
   '</code>\npwd: <code>' + process.cwd() + '</code>\nenv:\n<pre>' +
   JSON.stringify(sorted(process.env), null, 2) +
   '</pre>', {parse_mode: 'HTML'}
-).catch(onGlobalError);
+).catch(globalErrorHandler());
