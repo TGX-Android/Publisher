@@ -897,7 +897,18 @@ function uploadToTelegram (bot, task, build, variant, onDone) {
     }).then((message) => {
     apkStream.close();
     files.apkFile.remote_id = message.document.file_id;
-    onDone(0);
+    const debugSymbolsStream = fs.createReadStream(files.nativeDebugSymbolsFile.path);
+    bot.sendDocument(build.serviceChatId, debugSymbolsStream, {
+      reply_to_message_id: message.message_id
+    }, {
+      contentType: ZIP_MIME_TYPE
+    }).then((symbolsMessage) => {
+      debugSymbolsStream.close();
+      onDone(0);
+    }).catch((e) => {
+      console.error('Cannot upload native-debug-symbols.zip', e);
+      onDone(1);
+    });
   }).catch((e) => {
     console.error('Cannot upload telegram file', e);
     onDone(1);
