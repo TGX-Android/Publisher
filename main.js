@@ -886,38 +886,50 @@ function uploadToTelegram (bot, task, build, variant, onDone) {
     onDone(1);
     return;
   }
-  
-  const apkStream = fs.createReadStream(files.apkFile.path);
-  bot.sendDocument(build.serviceChatId, apkStream, {
+
+  const failWithError = (message, e) => {
+    if (!task.endTime) {
+      console.error(message, e);
+      onDone(1);
+    }
+  };
+
+  bot.sendDocument(build.serviceChatId, fs.createReadStream(files.apkFile.path), {
       reply_to_message_id: build.serviceMessageId,
       caption: getBuildCaption(build, variant),
       parse_mode: 'HTML'
     }, {
       contentType: APK_MIME_TYPE
     }).then((message) => {
-    apkStream.close();
     files.apkFile.remote_id = message.document.file_id;
-    const debugSymbolsStream = fs.createReadStream(files.nativeDebugSymbolsFile.path);
-    bot.sendDocument(build.serviceChatId, debugSymbolsStream, {
+    bot.sendDocument(build.serviceChatId, fs.createReadStream(files.nativeDebugSymbolsFile.path), {
       reply_to_message_id: message.message_id
     }, {
-      contentType: ZIP_MIME_TYPE
+      contentType: 'application/zip'
     }).then((symbolsMessage) => {
-      debugSymbolsStream.close();
-      onDone(0);
+      if (!files.mappingFile) { // Mapping file doesn't exist for builds made with --dontobfuscate option
+        onDone(0);
+        return;
+      }
+      bot.sendDocument(build.serviceChatId, fs.createReadStream(files.mappingFile.path), {
+        reply_to_message_id: message.message_id
+      }, {
+        contentType: 'text/plain'
+      }).then((mappingMessage) => {
+        onDone(0);
+      }).catch((e) => {
+        failWithError('Cannot upload mapping file', e);
+      })
     }).catch((e) => {
-      console.error('Cannot upload native-debug-symbols.zip', e);
-      onDone(1);
+      failWithError('Cannot upload native-debug-symbols.zip', e);
     });
   }).catch((e) => {
-    console.error('Cannot upload telegram file', e);
-    onDone(1);
+    failWithError('Cannot upload telegram file', e);
   });
 
   return async () => {
     if (!task.endTime) {
-      await apkStream.close();
-      onDone(1);
+      failWithError('Aborted', new Error());
     }
   };
 }
