@@ -1632,12 +1632,13 @@ function processPrivateCommand (botId, bot, msg, command, commandArgsRaw) {
             silence: true,
             script: 'scripts/force-clean.sh'
           };
+          const currentBranch = commandArgs.branch || 'main';
           const checkoutTask = {
-            name: 'checkout',
+            name: 'checkout' + (currentBranch !== 'main' ? 'Branch' : ''),
             cmd: 'git clean -xfdf && \
                   git submodule foreach --recursive git clean -xfdf && \
-                  git checkout main && \
-                  git reset --hard origin/main && \
+                  git checkout ' + currentBranch + ' --recurse-submodules && \
+                  git reset --hard origin/' + currentBranch + ' && \
                   git pull && \
                   git submodule foreach --recursive git reset --hard && \
                   git submodule update --init --recursive'
@@ -1691,8 +1692,8 @@ function processPrivateCommand (botId, bot, msg, command, commandArgsRaw) {
 
               const squashPrTask = {
                 name: 'squashPr-' + pullRequestId,
-                cmd: 'git merge main -m "Sync with main" && \
-                      git checkout main && \
+                cmd: 'git merge ' + currentBranch + ' -m "Sync with ' + currentBranch + '" && \
+                      git checkout ' + currentBranch + ' && \
                       ' + (isSecondary ? 'git stash pop &&' : '') + ' \
                       git merge pr-' + pullRequestId + ' --squash --autostash && \
                       git branch -D pr-' + pullRequestId
