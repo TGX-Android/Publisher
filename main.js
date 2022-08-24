@@ -1637,7 +1637,8 @@ function processPrivateCommand (botId, bot, msg, command, commandArgsRaw) {
             name: 'checkout' + (currentBranch !== 'main' ? 'Branch' : ''),
             cmd: 'git clean -xfdf && \
                   git submodule foreach --recursive git clean -xfdf && \
-                  git checkout ' + currentBranch + ' --recurse-submodules && \
+                  git fetch origin && \
+                  (git checkout ' + currentBranch + ' --recurse-submodules || git switch -c ' + currentBranch + ' origin/' + currentBranch + ') && \
                   git reset --hard origin/' + currentBranch + ' && \
                   git pull && \
                   git submodule foreach --recursive git reset --hard && \
