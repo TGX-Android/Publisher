@@ -744,7 +744,8 @@ function getFromToCommit (build) {
     return null;
   if (build.googlePlayTrack) {
     if (build.previousGooglePlayBuild &&
-        build.previousGooglePlayBuild.remoteUrl === build.git.remoteUrl) {
+        build.previousGooglePlayBuild.remoteUrl === build.git.remoteUrl &&
+        build.previousGooglePlayBuild.branch === build.git.branch) {
       return {
         commit_range: build.previousGooglePlayBuild.commit.short + '...' + build.git.commit.short,
         from_version: build.previousGooglePlayBuild.version.code
@@ -752,7 +753,8 @@ function getFromToCommit (build) {
     }
   } else if (build.telegramTrack) {
     if (build.previousTelegramBuild &&
-        build.previousTelegramBuild.remoteUrl === build.git.remoteUrl) {
+        build.previousTelegramBuild.remoteUrl === build.git.remoteUrl &&
+        build.previousTelegramBuild.branch === build.git.branch) {
       return {
         commit_range: build.previousTelegramBuild.commit.short + '...' + build.git.commit.short,
         from_version: build.previousTelegramBuild.version.code
@@ -1446,7 +1448,7 @@ function processPrivateCommand (botId, bot, msg, command, commandArgsRaw) {
           build.telegramTrack = 'PR#' + build.pullRequestsMetadata.map((pullRequestsMetadata) => pullRequestsMetadata.id).join(',');
         }
 
-        if (build.git.branch !== 'main' && (build.googlePlayTrack || build.telegramTrack)) {
+        if (build.git.branch !== 'main' && ['production'/*, 'beta'*/].includes(build.googlePlayTrack)) {
           bot.sendMessage(msg.chat.id,
             'You are currently on a <b>' + build.git.branch + '</b> branch. Only <b>main</b> branch can be published.'
           );
