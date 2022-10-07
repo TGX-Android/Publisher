@@ -1401,7 +1401,7 @@ function processPrivateCommand (botId, bot, msg, command, commandArgsRaw) {
         }, {});
 
         const isPRBuild = command === '/deploy_pr';
-        const isPrivate = !(['/deploy_beta', '/deploy_stable', '/deploy_pr'].includes(command));
+        const isPrivate = !(['/deploy_beta'/*, '/deploy_stable'*/, '/deploy_pr'].includes(command));
         const skipBuild = command === '/update_sdk';
         const outputChatId = isPRBuild ? PR_CHAT_ID : isPrivate ? (buildType === 'alpha' ? ALPHA_CHAT_ID : ADMIN_USER_ID) : BETA_CHAT_ID;
         const buildId = nextBuildId();
