@@ -739,25 +739,34 @@ function getBuildFiles (build, variant, callback) {
   });
 }
 
-function getFromToCommit (build) {
+function getFromToCommit (build, allowProduction) {
   if (build.outputApplication && build.outputApplication.isPRBuild)
     return null;
   if (build.googlePlayTrack) {
-    if (build.previousGooglePlayBuild &&
-        build.previousGooglePlayBuild.remoteUrl === build.git.remoteUrl &&
-        build.previousGooglePlayBuild.branch === build.git.branch) {
+    let googlePlayBuild = allowProduction ? build.previousGooglePlayProductionBuild : null;
+    if (!(googlePlayBuild &&
+        googlePlayBuild.remoteUrl === build.git.remoteUrl &&
+        googlePlayBuild.branch === build.git.branch)) {
+      googlePlayBuild = build.previousGooglePlayBuild;
+    }
+    if (googlePlayBuild &&
+        googlePlayBuild.remoteUrl === build.git.remoteUrl &&
+        googlePlayBuild.branch === build.git.branch) {
       return {
-        commit_range: build.previousGooglePlayBuild.commit.short + '...' + build.git.commit.short,
-        from_version: build.previousGooglePlayBuild.version.code
+        commit_range: googlePlayBuild.commit.short + '...' + build.git.commit.short,
+        from_version: googlePlayBuild.version,
+        build_information: googlePlayBuild
       };
     }
   } else if (build.telegramTrack) {
-    if (build.previousTelegramBuild &&
-        build.previousTelegramBuild.remoteUrl === build.git.remoteUrl &&
-        build.previousTelegramBuild.branch === build.git.branch) {
+    const telegramBuild = build.previousTelegramBuild;
+    if (telegramBuild &&
+        telegramBuild.remoteUrl === build.git.remoteUrl &&
+        telegramBuild.branch === build.git.branch) {
       return {
-        commit_range: build.previousTelegramBuild.commit.short + '...' + build.git.commit.short,
-        from_version: build.previousTelegramBuild.version.code
+        commit_range: telegramBuild.commit.short + '...' + build.git.commit.short,
+        from_version: telegramBuild.version,
+        build_information: telegramBuild
       };
     }
   }
@@ -782,7 +791,7 @@ function getBuildCaption (build, variant, isPrivate) {
 
   const fromToCommit = getFromToCommit(build);
   if (fromToCommit) {
-    caption += '\n\n<b>Changes from ' + fromToCommit.from_version + '</b>: <a href="' + build.git.remoteUrl + '/compare/' + fromToCommit.commit_range + '">' + fromToCommit.commit_range + '</a>';
+    caption += '\n\n<b>Changes from ' + fromToCommit.from_version.code + '</b>: <a href="' + build.git.remoteUrl + '/compare/' + fromToCommit.commit_range + '">' + fromToCommit.commit_range + '</a>';
   }
 
   caption += '\n\n#' + variant;
@@ -984,11 +993,26 @@ async function tracePublishedGooglePlayBuild (build) {
   await storeObject('google_play', toShotBuildInfo(build), build.googlePlayTrack);
 }
 
-async function findPublishedGooglePlayBuild (build) {
-  if (build.googlePlayTrack) {
-    return await getObject('google_play', build.googlePlayTrack);
+async function findPublishedGooglePlayBuild (build, forcedTrack) {
+  const track = forcedTrack || build.googlePlayTrack;
+  if (track) {
+    return await getObject('google_play', track);
   }
   return null;
+}
+
+async function fetchAvailableLanguageCodes () {
+  try {
+    const result = await fetchHttp('https://translations.telegram.org/languages/list/android_x');
+    if (typeof result === 'string') {
+      return JSON.parse(result);
+    } else {
+      console.error('fetchAvailableLanguageCodes result is not a string', result);
+    }
+  } catch (e) {
+    console.log('fetchAvailableLanguageCodes failed', e);
+  }
+  return ['en'];
 }
 
 function uploadToGooglePlay (task, build, onDone) {
@@ -1013,6 +1037,25 @@ function uploadToGooglePlay (task, build, onDone) {
       let onBuildUploaded = (uploadedBuildVariant) => {
         if (--remainingApkCount !== 0)
           return;
+
+        const releaseNotes = [];
+
+        const changeLogVersionName = build.version.name + (
+          build.googlePlayTrack !== 'production' ?
+            ' ' + build.googlePlayTrack :
+            ''
+        );
+        let changeLogText = changeLogVersionName + '\n\n' + 'https://t.me/tgx_android';
+        const fromToCommit = getFromToCommit(build, true);
+        if (fromToCommit) {
+          changeLogText += '\n\nChanges from ' + fromToCommit.from_version.name + ':\n';
+          changeLogText += build.git.remoteUrl + '/compare/' + fromToCommit.commit_range;
+        }
+        releaseNotes.push({
+          language: 'en-US',
+          text: changeLogText
+        });
+
         // Setting track
         play.edits.tracks.update({
           editId: editId,
@@ -1023,16 +1066,7 @@ function uploadToGooglePlay (task, build, onDone) {
             releases: [{
               name: build.version.name + ' ' + build.googlePlayTrack,
               status: build.googlePlayTrack === 'production' ? 'draft' : 'completed',
-              releaseNotes: [
-                {
-                  language: 'en-US',
-                  text: build.version.name + (
-                    build.googlePlayTrack !== 'production' ?
-                    ' ' + build.googlePlayTrack :
-                    ''
-                  ) + '\n\n' + 'https://t.me/tgx_android'
-                }
-              ],
+              releaseNotes,
               versionCodes: uploadedVersionCodes
             }]
           }
@@ -1485,6 +1519,10 @@ function processPrivateCommand (botId, bot, msg, command, commandArgsRaw) {
                   return;
                 }
                 build.version = newVersion;
+                const previousGooglePlayProductionBuild =
+                  build.googlePlayTrack !== 'production' ?
+                    await findPublishedGooglePlayBuild(build, 'production') :
+                    null;
                 const previousGooglePlayBuild = await findPublishedGooglePlayBuild(build);
                 const previousTelegramBuild = await findPublishedTelegramBuild(build);
                 if (!isPRBuild && (
@@ -1503,6 +1541,7 @@ function processPrivateCommand (botId, bot, msg, command, commandArgsRaw) {
                 }
                 build.previousTelegramBuild = previousTelegramBuild;
                 build.previousGooglePlayBuild = previousGooglePlayBuild;
+                build.previousGooglePlayProductionBuild = previousGooglePlayProductionBuild;
                 callback(0);
               });
             });
@@ -1577,7 +1616,11 @@ function processPrivateCommand (botId, bot, msg, command, commandArgsRaw) {
                     return;
                   }
                   appName = 'X #' + prIds.join(',') + ' by ' + prAuthors.join(' & ');
-                  appId = 'com.contest.' + prAuthors.map((author) => author.toLowerCase().replace(/[^a-zA-Z0-9_]/gi, '_')).sort().join('_');
+                  const prAuthorsList = prAuthors.map((author) => author.toLowerCase().replace(/[^a-zA-Z0-9_]/gi, '_')).sort().join('_');
+                  appId = 'com.contest.' + prAuthorsList;
+                  if (commandArgs.standalone) {
+                    appId += '.pr_' + prIds.join('_');
+                  }
                 }
 
                 properties += 'pr.ids=' + prIds.join(',') + '\n';
@@ -1637,7 +1680,9 @@ function processPrivateCommand (botId, bot, msg, command, commandArgsRaw) {
           const currentBranch = commandArgs.branch || 'main';
           const checkoutTask = {
             name: 'checkout' + (currentBranch !== 'main' ? 'Branch' : ''),
-            cmd: 'git clean -xfdf && \
+            cmd: '(git reset --merge || true) && \
+                  (git reset --hard origin/' + currentBranch + ' || true) && \
+                  git clean -xfdf && \
                   git submodule foreach --recursive git clean -xfdf && \
                   git fetch origin && \
                   (git checkout ' + currentBranch + ' --recurse-submodules || git switch -c ' + currentBranch + ' origin/' + currentBranch + ' || git switch ' + currentBranch + ') && \
@@ -1916,7 +1961,7 @@ function processPrivateCommand (botId, bot, msg, command, commandArgsRaw) {
             result += '<b>Version</b>: ' + '<code>' + build.version.name + '</code>';
           }
           if (changesUrl) {
-            result += '\n<b>Changes from ' + fromToCommit.from_version + '</b>: ' + changesUrl;
+            result += '\n<b>Changes from ' + fromToCommit.from_version.code + '</b>: ' + changesUrl;
           } else {
             result += '\n<b>Commit</b>: ' + commitUrl;
             if (build.git.date) {
