@@ -2298,7 +2298,7 @@ function processPrivateCommand (botId, bot, msg, command, commandArgsRaw) {
           }
           build.endTime = new Date();
           build.cleanup().then(async () => {
-            if (build.publicChatId && build.publicMessageId && !(build.aborted || build.error)) {
+            if (build.publicChatId && build.publicMessageId && !(build.aborted || build.error || isPRBuild)) {
               try {
                 await bot.pinChatMessage(build.publicChatId, build.publicMessageId);
               } catch (e) {
