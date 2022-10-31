@@ -773,7 +773,7 @@ function getFromToCommit (build, allowProduction) {
   return null;
 }
 
-function getBuildCaption (build, variant, isPrivate) {
+function getBuildCaption (build, variant, isPrivate, shortenChecksums) {
   let caption = '<b>Version</b>: <code>' + build.version.name + '-' + getDisplayVariant(variant) + '</code>';
   caption += '\n<b>Commit</b>: <a href="' + build.git.remoteUrl + '/tree/' + build.git.commit.long + '">' + build.git.commit.short + '</a>';
   if (build.git.date) {
@@ -782,12 +782,16 @@ function getBuildCaption (build, variant, isPrivate) {
   if (build.pullRequestsMetadata || !empty(build.pullRequests)) {
     caption += '\n<b>Pull requests</b>: ' + toDisplayPullRequestList(build);
   }
-  caption += '\n';
-  const checksums = ['md5', 'sha1', 'sha256'];
-  checksums.forEach((checksum) => {
-    const hash = build.files[variant].apkFile.checksum[checksum];
-    caption += '\n<b>' + toDisplayAlgorithm(checksum) + '</b>: <a href="https://t.me/tgx_bot?start=' + hash + '">' + hash + '</a>';
-  });
+
+  const checksumAlgorithms = ['md5', 'sha1', 'sha256'];
+  if (!shortenChecksums) {
+    caption += '\n';
+    checksumAlgorithms.forEach((algorithm) => {
+      const hash = build.files[variant].apkFile.checksum[algorithm];
+      const url = 'https://t.me/tgx_bot?start=' + hash;
+      caption += '\n<b>' + toDisplayAlgorithm(algorithm) + '</b>: <a href="' + url + '">' + hash + '</a>';
+    });
+  }
 
   const fromToCommit = getFromToCommit(build);
   if (fromToCommit) {
@@ -801,10 +805,24 @@ function getBuildCaption (build, variant, isPrivate) {
     case 'alpha': caption += ' #alpha'; break;
   }
   caption += ' #apk';
+  if (shortenChecksums) {
+    caption += ' (';
+    checksumAlgorithms.forEach((algorithm, index) => {
+      const hash = build.files[variant].apkFile.checksum[algorithm];
+      const url = 'https://t.me/tgx_bot?start=' + hash;
+      caption += '<b>';
+      if (index > 0) {
+        caption += ', ';
+      }
+      caption += '<a href="' + url + '">' + toDisplayAlgorithm(algorithm) + '</a>';
+      caption += '</b>';
+    });
+    caption += ')';
+  }
   return caption;
 }
 
-function publishToTelegram (bot, task, build, onDone, chatId, onlyPrivate, disableNotification) {
+function publishToTelegram (bot, task, build, onDone, chatId, onlyPrivate, disableNotification, shortenChecksums) {
   const docs = [];
   const variants = [];
   for (let variant in build.files) {
@@ -813,7 +831,7 @@ function publishToTelegram (bot, task, build, onDone, chatId, onlyPrivate, disab
       const doc = {
         type: 'document',
         media: file_id,
-        caption: getBuildCaption(build, variant, false),
+        caption: getBuildCaption(build, variant, false, shortenChecksums),
         parse_mode: 'HTML'
       };
       let ok = variant !== 'universal' || build.variants.length === 1;
@@ -1893,7 +1911,7 @@ function processPrivateCommand (botId, bot, msg, command, commandArgsRaw) {
               name: 'publishTelegram' + id + (build.googlePlayTrack === 'production' ? 'Draft' : ''),
               needsAwait: true,
               act: (task, callback) => {
-                return publishToTelegram(bot, task, build, callback, targetChatId, false, true);
+                return publishToTelegram(bot, task, build, callback, targetChatId, false, true, isPRBuild);
               }
             });
           }
