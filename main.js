@@ -1621,6 +1621,18 @@ function processPrivateCommand (botId, bot, msg, command, commandArgsRaw) {
                 'telegram.api_id=' + settings.telegram.app.api_id + '\n' +
                 'telegram.api_hash=' + settings.telegram.app.api_hash + '\n' +
                 'youtube.api_key=' + settings.youtube.api_key + '\n';
+              if (settings.extra) {
+                for (const extraGroupKey in settings.extra) {
+                  const extraGroup = settings.extra[extraGroupKey];
+                  if (typeof extraGroup === 'string') {
+                    properties += extraGroupKey + '=' + extraGroup + '\n';
+                  } else if (typeof extraGroup === 'object') {
+                    for (const extraKey in extraGroup) {
+                      properties += extraGroupKey + '.' + extraKey + '=' + extraGroup[extraKey] + '\n';
+                    }
+                  }
+                }
+              }
               if (!empty(build.pullRequests)) {
                 const prIds = build.pullRequestsMetadata.map((pullRequestMetadata) => pullRequestMetadata.id);
                 const prAuthors = [... new Set(build.pullRequestsMetadata.map((pullRequestMetadata) => {
