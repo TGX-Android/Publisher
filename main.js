@@ -26,7 +26,8 @@ const fs = require('fs'),
       path = require('path'),
       https = require('https'),
       http = require('http'),
-      iconv = require('iconv-lite');
+      iconv = require('iconv-lite'),
+      AdmZip = require('adm-zip');
 const { spawn, exec, execSync } = require('child_process');
 const { google } = require('googleapis');
 
@@ -1033,6 +1034,57 @@ async function fetchAvailableLanguageCodes () {
   return ['en'];
 }
 
+async function modifyNativeDebugSymbolsArchive (filePath) {
+  if (settings.modify_debug_symbols !== true) {
+    return fs.createReadStream(filePath);
+  }
+  const existingArchivePath = path.parse(filePath);
+  const temporaryExtractedDirPath = path.join(existingArchivePath.dir, existingArchivePath.name + '-unzipped-temp');
+  const modifiedArchivePath = path.join(existingArchivePath.dir, existingArchivePath.name + '-modified' + existingArchivePath.ext);
+
+  const existingZip = new AdmZip(filePath);
+
+  if (fs.existsSync(modifiedArchivePath)) {
+    fs.unlinkSync(modifiedArchivePath)
+  }
+  if (fs.existsSync(temporaryExtractedDirPath)) {
+    fs.rmdirSync(temporaryExtractedDirPath, { recursive: true, force: true });
+  }
+
+  existingZip.extractAllTo(temporaryExtractedDirPath, true);
+
+  if (fs.existsSync(temporaryExtractedDirPath)) {
+    let renamedCount = 0;
+    const renameFiles = (dirPath) => {
+      const files = fs.readdirSync(dirPath);
+      files.forEach((fileName) => {
+        const childFilePath = path.join(dirPath, fileName);
+        if (fs.statSync(childFilePath).isDirectory()) {
+          renameFiles(childFilePath)
+        } else if (fileName.match(/^.+\.so\.dbg$/g)) {
+          const newFilePath = path.join(dirPath, fileName.substring(0, fileName.length - '.dbg'.length));
+          if (!fs.existsSync(newFilePath)) {
+            fs.renameSync(childFilePath, newFilePath);
+            renamedCount++;
+          }
+        }
+      });
+    };
+    renameFiles(temporaryExtractedDirPath);
+    if (renamedCount > 0) {
+      const newZip = new AdmZip();
+      newZip.addLocalFolder(temporaryExtractedDirPath);
+      newZip.writeZip(modifiedArchivePath);
+      fs.rmdirSync(temporaryExtractedDirPath, { recursive: true, force: true });
+      console.log('Modified', renamedCount, 'file names in native-debug-symbols.zip');
+      return fs.createReadStream(modifiedArchivePath);
+    }
+  }
+
+  console.log('Using original native-debug-symbols.zip');
+  return fs.createReadStream(filePath);
+}
+
 function uploadToGooglePlay (task, build, onDone) {
   if (LOCAL || !build.files || !build.variants || !build.googlePlayTrack) {
     onDone(1);
@@ -1131,39 +1183,40 @@ function uploadToGooglePlay (task, build, onDone) {
             return;
           }
           uploadedVersionCodes.push(uploadedApk.data.versionCode);
-          const nativeStream = fs.createReadStream(files.nativeDebugSymbolsFile.path);
-          play.edits.deobfuscationfiles.upload({
-            editId: editId,
-            deobfuscationFileType: 'nativeCode',
-            apkVersionCode: uploadedApk.data.versionCode,
-            media: {
-              mimeType: ZIP_MIME_TYPE,
-              body: nativeStream
-            }
-          }).then((uploadedNativeDebugSymbols) => {
-            nativeStream.close();
-            console.log('native-debug-symbols.zip uploaded', variant, JSON.stringify(uploadedNativeDebugSymbols));
-            const mappingStream = fs.createReadStream(files.mappingFile.path);
+          modifyNativeDebugSymbolsArchive(files.nativeDebugSymbolsFile.path).then((nativeStream) => {
             play.edits.deobfuscationfiles.upload({
               editId: editId,
-              deobfuscationFileType: 'proguard',
+              deobfuscationFileType: 'nativeCode',
               apkVersionCode: uploadedApk.data.versionCode,
               media: {
-                mimeType: TXT_MIME_TYPE,
-                body: mappingStream
+                mimeType: ZIP_MIME_TYPE,
+                body: nativeStream
               }
-            }).then((uploadedMappingFile) => {
-              mappingStream.close();
-              console.log('Mapping file uploaded', variant, JSON.stringify(uploadedMappingFile));
-              // Success! Now we can proceed.
-              onBuildUploaded(variant);
-            }).catch((mappingFileUploadError) => {
-              console.error('Failed to upload mapping file.', variant, mappingFileUploadError);
+            }).then((uploadedNativeDebugSymbols) => {
+              nativeStream.close();
+              console.log('native-debug-symbols.zip uploaded', variant, JSON.stringify(uploadedNativeDebugSymbols));
+              const mappingStream = fs.createReadStream(files.mappingFile.path);
+              play.edits.deobfuscationfiles.upload({
+                editId: editId,
+                deobfuscationFileType: 'proguard',
+                apkVersionCode: uploadedApk.data.versionCode,
+                media: {
+                  mimeType: TXT_MIME_TYPE,
+                  body: mappingStream
+                }
+              }).then((uploadedMappingFile) => {
+                mappingStream.close();
+                console.log('Mapping file uploaded', variant, JSON.stringify(uploadedMappingFile));
+                // Success! Now we can proceed.
+                onBuildUploaded(variant);
+              }).catch((mappingFileUploadError) => {
+                console.error('Failed to upload mapping file.', variant, mappingFileUploadError);
+                onDone(1);
+              });
+            }).catch((nativeDebugSymbolsUploadError) => {
+              console.error('Failed to upload native-debug-symbols.zip', variant, nativeDebugSymbolsUploadError);
               onDone(1);
             });
-          }).catch((nativeDebugSymbolsUploadError) => {
-            console.error('Failed to upload native-debug-symbols.zip', variant, nativeDebugSymbolsUploadError);
-            onDone(1);
           });
         }).catch((apkUploadError) => {
           console.error('Failed to upload apk', variant, apkUploadError);

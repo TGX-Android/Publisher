@@ -5,6 +5,8 @@
     "download_url": "https://telegram.org/dlx",
     "sources_url": "https://github.com/TGX-Android/Telegram-X"
   },
+  "server_verbosity": 0,
+  "modify_debug_symbols": false,
   "telegram": {
     "app": {
       "api_id": 0,
@@ -17,7 +19,9 @@
     "admin_user_id": 0,
     "target_chat_id": {
       "public_builds": "numeric chat_id or @username",
-      "private_builds": "numeric chat_id or @username"
+      "pr_builds": "numeric chat_id or @username",
+      "private_builds": "numeric chat_id or @username",
+      "internal_builds": "numeric chat_id or @username"
     }
   },
   "youtube": {
