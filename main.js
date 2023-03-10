@@ -1254,7 +1254,7 @@ function uploadToGooglePlay (task, build, onDone) {
         onVariantChecked();
       } else {
         const msg = 'APK #' + build.version.name + ' was already published. Version bump required.';
-        trask.logPublicly(msg);
+        task.logPublicly(msg);
         console.error(msg);
         onDone(1);
       }
