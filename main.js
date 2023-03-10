@@ -932,26 +932,28 @@ function uploadToTelegram (bot, task, build, variant, onDone) {
       contentType: APK_MIME_TYPE
     }).then((message) => {
     files.apkFile.remote_id = message.document.file_id;
-    bot.sendDocument(build.serviceChatId, fs.createReadStream(files.nativeDebugSymbolsFile.path), {
-      reply_to_message_id: message.message_id
-    }, {
-      contentType: 'application/zip'
-    }).then((symbolsMessage) => {
-      if (!files.mappingFile) { // Mapping file doesn't exist for builds made with --dontobfuscate option
-        onDone(0);
-        return;
-      }
-      bot.sendDocument(build.serviceChatId, fs.createReadStream(files.mappingFile.path), {
+    modifyNativeDebugSymbolsArchive(files.nativeDebugSymbolsFile.path).then((nativeDebugSymbolsStream) => {
+      bot.sendDocument(build.serviceChatId, nativeDebugSymbolsStream, {
         reply_to_message_id: message.message_id
       }, {
-        contentType: 'text/plain'
-      }).then((mappingMessage) => {
-        onDone(0);
+        contentType: 'application/zip'
+      }).then((symbolsMessage) => {
+        if (!files.mappingFile) { // Mapping file doesn't exist for builds made with --dontobfuscate option
+          onDone(0);
+          return;
+        }
+        bot.sendDocument(build.serviceChatId, fs.createReadStream(files.mappingFile.path), {
+          reply_to_message_id: message.message_id
+        }, {
+          contentType: 'text/plain'
+        }).then((mappingMessage) => {
+          onDone(0);
+        }).catch((e) => {
+          failWithError('Cannot upload mapping file', e);
+        })
       }).catch((e) => {
-        failWithError('Cannot upload mapping file', e);
-      })
-    }).catch((e) => {
-      failWithError('Cannot upload native-debug-symbols.zip', e);
+        failWithError('Cannot upload native-debug-symbols.zip', e);
+      });
     });
   }).catch((e) => {
     failWithError('Cannot upload telegram file', e);
@@ -1183,17 +1185,17 @@ function uploadToGooglePlay (task, build, onDone) {
             return;
           }
           uploadedVersionCodes.push(uploadedApk.data.versionCode);
-          modifyNativeDebugSymbolsArchive(files.nativeDebugSymbolsFile.path).then((nativeStream) => {
+          modifyNativeDebugSymbolsArchive(files.nativeDebugSymbolsFile.path).then((nativeDebugSymbolsStream) => {
             play.edits.deobfuscationfiles.upload({
               editId: editId,
               deobfuscationFileType: 'nativeCode',
               apkVersionCode: uploadedApk.data.versionCode,
               media: {
                 mimeType: ZIP_MIME_TYPE,
-                body: nativeStream
+                body: nativeDebugSymbolsStream
               }
             }).then((uploadedNativeDebugSymbols) => {
-              nativeStream.close();
+              nativeDebugSymbolsStream.close();
               console.log('native-debug-symbols.zip uploaded', variant, JSON.stringify(uploadedNativeDebugSymbols));
               const mappingStream = fs.createReadStream(files.mappingFile.path);
               play.edits.deobfuscationfiles.upload({
