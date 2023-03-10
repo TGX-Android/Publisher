@@ -1066,7 +1066,7 @@ async function modifyNativeDebugSymbolsArchive (filePath) {
         } else if (fileName.match(/^.+\.so\.dbg$/g)) {
           const newFilePath = path.join(dirPath, fileName.substring(0, fileName.length - '.dbg'.length));
           if (!fs.existsSync(newFilePath)) {
-            fs.renameSync(childFilePath, newFilePath);
+            fs.copyFileSync(childFilePath, newFilePath);
             renamedCount++;
           }
         }
@@ -1077,7 +1077,7 @@ async function modifyNativeDebugSymbolsArchive (filePath) {
       const newZip = new AdmZip();
       newZip.addLocalFolder(temporaryExtractedDirPath);
       newZip.writeZip(modifiedArchivePath);
-      fs.rmdirSync(temporaryExtractedDirPath, { recursive: true, force: true });
+      // fs.rmdirSync(temporaryExtractedDirPath, { recursive: true, force: true });
       console.log('Modified', renamedCount, 'file names in native-debug-symbols.zip');
       return fs.createReadStream(modifiedArchivePath);
     }
