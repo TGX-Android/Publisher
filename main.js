@@ -794,7 +794,10 @@ function getBuildCaption (build, variant, isPrivate, shortenChecksums) {
     });
   }
 
-  const fromToCommit = getFromToCommit(build);
+  const fromToCommit = getFromToCommit(build,
+    build.googlePlayTrack && build.previousGooglePlayProductionBuild && build.previousGooglePlayBuild &&
+    build.previousGooglePlayBuild.version.code < build.previousGooglePlayProductionBuild.version.code
+  );
   if (fromToCommit) {
     caption += '\n\n<b>Changes from ' + fromToCommit.from_version.code + '</b>: <a href="' + build.git.remoteUrl + '/compare/' + fromToCommit.commit_range + '">' + fromToCommit.commit_range + '</a>';
   }
@@ -2004,7 +2007,10 @@ function processPrivateCommand (botId, bot, msg, command, commandArgsRaw) {
         const replyMarkup = JSON.stringify({inline_keyboard: [[{text: 'Cancel', callback_data: 'abort' + buildId}]]});
         build.asString = (isPublic, shorten) => {
           const commitUrl = '<a href="' + build.git.remoteUrl + '/tree/' + build.git.commit.long + '">' + build.git.commit.short + '</a>';
-          const fromToCommit = getFromToCommit(build);
+          const fromToCommit = getFromToCommit(build,
+            build.googlePlayTrack && build.previousGooglePlayProductionBuild && build.previousGooglePlayBuild &&
+            build.previousGooglePlayBuild.version.code < build.previousGooglePlayProductionBuild.version.code
+          );
           const changesUrl = fromToCommit ? '<a href="' + build.git.remoteUrl + '/compare/' + fromToCommit.commit_range + '">' + fromToCommit.commit_range + '</a>' : null;
           let result = null;
           if (isPublic) {
