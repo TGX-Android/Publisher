@@ -1768,16 +1768,18 @@ function processPrivateCommand (botId, bot, msg, command, commandArgsRaw) {
           const currentBranch = commandArgs.branch || 'main';
           const checkoutTask = {
             name: 'checkout' + (currentBranch !== 'main' ? 'Branch' : ''),
-            cmd: '(git reset --merge || true) && \
-                  (git reset --hard origin/' + currentBranch + ' || true) && \
-                  git clean -xfdf && \
-                  git submodule foreach --recursive git clean -xfdf && \
-                  git fetch origin && \
-                  (git checkout ' + currentBranch + ' --recurse-submodules || git switch -c ' + currentBranch + ' origin/' + currentBranch + ' || git switch ' + currentBranch + ') && \
-                  git reset --hard origin/' + currentBranch + ' && \
-                  git pull && \
-                  git submodule foreach --recursive git reset --hard && \
-                  git submodule update --init --recursive'
+            cmd: '(git clean -q -xdff || true) && \
+                 (git reset -q --hard || true) && \
+                 (git checkout -q -- . || true) && \
+                 (git fetch origin -q --recurse-submodules || true) && \
+                 git checkout -q ' + currentBranch + ' && \
+                 git fetch origin -q --recurse-submodules && \
+                 git reset --hard -q origin/' + currentBranch + ' && \
+                 git submodule deinit -q -f --all && \
+                 git submodule update -q --init --recursive \
+                 git clean -q -xdff && \
+                 git submodule foreach -q --recursive git clean -q -xdff && \
+                 echo "Using commit $(git rev-parse --short HEAD) ($(git rev-parse --abbrev-ref HEAD)): $(git show -s --format=%s)"'
           };
           build.tasks.push(resetTask);
           build.tasks.push(checkoutTask);
