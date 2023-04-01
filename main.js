@@ -1768,17 +1768,15 @@ function processPrivateCommand (botId, bot, msg, command, commandArgsRaw) {
           const currentBranch = commandArgs.branch || 'main';
           const checkoutTask = {
             name: 'checkout' + (currentBranch !== 'main' ? 'Branch' : ''),
-            cmd: '(git clean -q -xdff || true) && \
-                 (git reset -q --hard || true) && \
+            cmd: '(git reset -q --hard || true) && \
                  (git checkout -q -- . || true) && \
-                 (git fetch origin -q --recurse-submodules || true) && \
+                 (git fetch origin -q || true) && \
                  git checkout -q ' + currentBranch + ' && \
-                 git fetch origin -q --recurse-submodules && \
                  git reset --hard -q origin/' + currentBranch + ' && \
                  git submodule deinit -q -f --all && \
-                 git submodule update -q --init --recursive \
-                 git clean -q -xdff && \
-                 git submodule foreach -q --recursive git clean -q -xdff && \
+                 git submodule update -q --init --recursive && \
+                 git submodule foreach -q --recursive git reset -q --hard && \
+                 git submodule foreach -q --recursive git checkout -q -- . && \
                  echo "Using commit $(git rev-parse --short HEAD) ($(git rev-parse --abbrev-ref HEAD)): $(git show -s --format=%s)"'
           };
           build.tasks.push(resetTask);
