@@ -1040,9 +1040,27 @@ async function fetchAvailableLanguageCodes () {
 }
 
 async function modifyNativeDebugSymbolsArchive (filePath) {
-  if (settings.modify_debug_symbols !== true) {
+  let allowExtraDebugSymbols = false;
+
+  const tdlibPath = path.join(settings.TGX_SOURCE_PATH, 'tdlib');
+  const extraNativeDebugSymbolsPath = path.join(tdlibPath, 'source', 'build', 'td', 'native-debug-symbols');
+  if (fs.existsSync(extraNativeDebugSymbolsPath)) {
+    // Make sure tdlib/version.txt and tdlib/source/build/td/native-debug-symbols/version.txt match
+    const tdlibVersionPath = path.join(tdlibPath, 'version.txt');
+    const extraNativeDebugSymbolsVersionPath = path.join(extraNativeDebugSymbolsPath, 'version.txt');
+    if (fs.existsSync(tdlibVersionPath) && fs.existsSync(extraNativeDebugSymbolsVersionPath)) {
+      const tdlibVersion = fs.readFileSync(tdlibVersionPath);
+      const extraNativeDebugSymbolsVersion = fs.readFileSync(extraNativeDebugSymbolsVersionPath);
+      allowExtraDebugSymbols = tdlibVersion.equals(extraNativeDebugSymbolsVersion);
+      console.log('TDLib and native-debug-symbols match:', allowExtraDebugSymbols);
+    }
+  }
+
+  if (settings.modify_debug_symbols !== true && !allowExtraDebugSymbols) {
+    console.log('Using original native-debug-symbols.zip');
     return fs.createReadStream(filePath);
   }
+
   const existingArchivePath = path.parse(filePath);
   const temporaryExtractedDirPath = path.join(existingArchivePath.dir, existingArchivePath.name + '-unzipped-temp');
   const modifiedArchivePath = path.join(existingArchivePath.dir, existingArchivePath.name + '-modified' + existingArchivePath.ext);
@@ -1059,34 +1077,62 @@ async function modifyNativeDebugSymbolsArchive (filePath) {
   existingZip.extractAllTo(temporaryExtractedDirPath, true);
 
   if (fs.existsSync(temporaryExtractedDirPath)) {
-    let renamedCount = 0;
-    const renameFiles = (dirPath) => {
-      const files = fs.readdirSync(dirPath);
-      files.forEach((fileName) => {
-        const childFilePath = path.join(dirPath, fileName);
-        if (fs.statSync(childFilePath).isDirectory()) {
-          renameFiles(childFilePath)
-        } else if (fileName.match(/^.+\.so\.dbg$/g)) {
-          const newFilePath = path.join(dirPath, fileName.substring(0, fileName.length - '.dbg'.length));
-          if (!fs.existsSync(newFilePath)) {
-            fs.copyFileSync(childFilePath, newFilePath);
-            renamedCount++;
+    let addedCount = 0;
+    if (allowExtraDebugSymbols) {
+      // Copy *.so.dbg related to TDLib to extracted directory
+      const copyFiles = (dirPath, relativeDirPath) => {
+        const files = fs.readdirSync(dirPath);
+        files.forEach((fileName) => {
+          const childFilePath = path.join(dirPath, fileName);
+          if (fs.statSync(childFilePath).isDirectory()) {
+            copyFiles(childFilePath, relativeDirPath ? path.join(relativeDirPath, fileName) : fileName);
+          } else if (fileName.match(/^.+\.so\.dbg$/g)) {
+            const toFilePath = relativeDirPath ?
+              path.join(temporaryExtractedDirPath, relativeDirPath, fileName) :
+              path.join(temporaryExtractedDirPath, fileName);
+            if (!fs.existsSync(toFilePath)) {
+              fs.copyFileSync(childFilePath, toFilePath);
+              addedCount++;
+            }
           }
-        }
-      });
-    };
-    renameFiles(temporaryExtractedDirPath);
-    if (renamedCount > 0) {
+        });
+      };
+      copyFiles(extraNativeDebugSymbolsPath);
+    }
+
+    let renamedCount = 0;
+    if (settings.modify_debug_symbols === true) {
+      // Rename *.so.dbg to just *.so
+      // DEPRECATED
+      /*const renameFiles = (dirPath) => {
+        const files = fs.readdirSync(dirPath);
+        files.forEach((fileName) => {
+          const childFilePath = path.join(dirPath, fileName);
+          if (fs.statSync(childFilePath).isDirectory()) {
+            renameFiles(childFilePath)
+          } else if (fileName.match(/^.+\.so\.dbg$/g)) {
+            const newFilePath = path.join(dirPath, fileName.substring(0, fileName.length - '.dbg'.length));
+            if (!fs.existsSync(newFilePath)) {
+              fs.copyFileSync(childFilePath, newFilePath);
+              renamedCount++;
+            }
+          }
+        });
+      };
+      renameFiles(temporaryExtractedDirPath);*/
+    }
+
+    if (renamedCount > 0 || addedCount > 0) {
       const newZip = new AdmZip();
       newZip.addLocalFolder(temporaryExtractedDirPath);
       newZip.writeZip(modifiedArchivePath);
       // fs.rmdirSync(temporaryExtractedDirPath, { recursive: true, force: true });
-      console.log('Modified', renamedCount, 'file names in native-debug-symbols.zip');
+      console.log('Modified native-debug-symbols.zip, added:', addedCount, 'renamed:', renamedCount);
       return fs.createReadStream(modifiedArchivePath);
     }
   }
 
-  console.log('Using original native-debug-symbols.zip');
+  console.log('Fallback to original native-debug-symbols.zip');
   return fs.createReadStream(filePath);
 }
 
