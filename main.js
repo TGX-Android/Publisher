@@ -67,7 +67,7 @@ const TELEGRAM_APP_HASH = process.env.TELEGRAM_APP_HASH || settings.telegram.ser
 
 const PACKAGE_NAME = settings.app.id;
 
-['TGX_SOURCE_PATH', 'TGX_KEYSTORE_PATH', 'ANDROID_SDK_ROOT', 'GOOGLE_TOKEN_PATH'].forEach((path) => {
+['TGX_SOURCE_PATH', 'TGX_KEYSTORE_PATH', 'ANDROID_SDK_ROOT', 'GOOGLE_TOKEN_PATH', 'TDLIB_SYMBOLS_PATH'].forEach((path) => {
   if (!checkPath(process.env[path]) && !(LOCAL && path === 'GOOGLE_TOKEN_PATH')) {
     console.error(path + ' not found! ' + process.env[path]);
     process.exit(1);
@@ -1043,9 +1043,9 @@ async function modifyNativeDebugSymbolsArchive (filePath) {
   let allowExtraDebugSymbols = false;
 
   const tdlibPath = path.join(settings.TGX_SOURCE_PATH, 'tdlib');
-  const extraNativeDebugSymbolsPath = path.join(tdlibPath, 'source', 'build', 'td', 'native-debug-symbols');
+  const extraNativeDebugSymbolsPath = settings.TDLIB_SYMBOLS_PATH || path.join(tdlibPath, 'source', 'build', 'native-debug-symbols');
   if (fs.existsSync(extraNativeDebugSymbolsPath)) {
-    // Make sure tdlib/version.txt and tdlib/source/build/td/native-debug-symbols/version.txt match
+    // Make sure tdlib/version.txt and tdlib/source/build/native-debug-symbols/version.txt match
     const tdlibVersionPath = path.join(tdlibPath, 'version.txt');
     const extraNativeDebugSymbolsVersionPath = path.join(extraNativeDebugSymbolsPath, 'version.txt');
     if (fs.existsSync(tdlibVersionPath) && fs.existsSync(extraNativeDebugSymbolsVersionPath)) {
