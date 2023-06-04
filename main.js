@@ -1044,7 +1044,7 @@ async function modifyNativeDebugSymbolsArchive (filePath) {
 
   const tdlibPath = path.join(settings.TGX_SOURCE_PATH, 'tdlib');
   const extraNativeDebugSymbolsPath = settings.TDLIB_SYMBOLS_PATH || path.join(tdlibPath, 'source', 'build', 'native-debug-symbols');
-  if (fs.existsSync(extraNativeDebugSymbolsPath)) {
+  if (settings.add_tdlib_debug_symbols === true && fs.existsSync(extraNativeDebugSymbolsPath)) {
     // Make sure tdlib/version.txt and tdlib/source/build/native-debug-symbols/version.txt match
     const tdlibVersionPath = path.join(tdlibPath, 'version.txt');
     const extraNativeDebugSymbolsVersionPath = path.join(extraNativeDebugSymbolsPath, 'version.txt');
