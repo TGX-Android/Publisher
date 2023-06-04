@@ -20,7 +20,6 @@ process.env.NTBA_FIX_350 = 1;
 
 const fs = require('fs'),
       os = require('os'),
-      level = require('level'),
       crypto = require('crypto'),
       TelegramBot = require('node-telegram-bot-api'),
       path = require('path'),
@@ -30,6 +29,7 @@ const fs = require('fs'),
       AdmZip = require('adm-zip');
 const { spawn, exec, execSync } = require('child_process');
 const { google } = require('googleapis');
+const { Level } = require('level');
 
 // ERROR
 
@@ -117,7 +117,7 @@ const play = LOCAL ? null : google.androidpublisher({
 // MAIN
 
 
-const db = level('./db');
+const db = new Level('./db');
 
 const cpus = os.cpus();
 const cpuCount = cpus.length;
