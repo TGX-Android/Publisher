@@ -935,7 +935,8 @@ function uploadToTelegram (bot, task, build, variant, onDone) {
       contentType: APK_MIME_TYPE
     }).then((message) => {
     files.apkFile.remote_id = message.document.file_id;
-    modifyNativeDebugSymbolsArchive(files.nativeDebugSymbolsFile.path).then((nativeDebugSymbolsStream) => {
+    modifyNativeDebugSymbolsArchive(files.nativeDebugSymbolsFile.path).then((nativeDebugSymbolsPath) => {
+      const nativeDebugSymbolsStream = fs.createReadStream(nativeDebugSymbolsPath);
       bot.sendDocument(build.serviceChatId, nativeDebugSymbolsStream, {
         reply_to_message_id: message.message_id
       }, {
@@ -1058,7 +1059,7 @@ async function modifyNativeDebugSymbolsArchive (filePath) {
 
   if (settings.modify_debug_symbols !== true && !allowExtraDebugSymbols) {
     console.log('Using original native-debug-symbols.zip');
-    return fs.createReadStream(filePath);
+    return filePath;
   }
 
   const existingArchivePath = path.parse(filePath);
@@ -1128,12 +1129,29 @@ async function modifyNativeDebugSymbolsArchive (filePath) {
       newZip.writeZip(modifiedArchivePath);
       // fs.rmdirSync(temporaryExtractedDirPath, { recursive: true, force: true });
       console.log('Modified native-debug-symbols.zip, added:', addedCount, 'renamed:', renamedCount);
-      return fs.createReadStream(modifiedArchivePath);
+      return modifiedArchivePath;
     }
   }
 
   console.log('Fallback to original native-debug-symbols.zip');
-  return fs.createReadStream(filePath);
+  return filePath;
+}
+
+async function attemptAction (maxAttemptsCount, act, onRetry) {
+  let error = null;
+  for (let i = 0; i < maxAttemptsCount; i++) {
+    if (i > 0 && onRetry) {
+      onRetry(error, i + 1);
+      await sleep(i * 1000);
+    }
+    try {
+      const result = await new Promise(act);
+      return result;
+    } catch (e) {
+      error = e;
+    }
+  }
+  throw error;
 }
 
 function uploadToGooglePlay (task, build, onDone) {
@@ -1234,18 +1252,24 @@ function uploadToGooglePlay (task, build, onDone) {
             return;
           }
           uploadedVersionCodes.push(uploadedApk.data.versionCode);
-          modifyNativeDebugSymbolsArchive(files.nativeDebugSymbolsFile.path).then((nativeDebugSymbolsStream) => {
-            play.edits.deobfuscationfiles.upload({
-              editId: editId,
-              deobfuscationFileType: 'nativeCode',
-              apkVersionCode: uploadedApk.data.versionCode,
-              media: {
-                mimeType: ZIP_MIME_TYPE,
-                body: nativeDebugSymbolsStream
-              }
+          modifyNativeDebugSymbolsArchive(files.nativeDebugSymbolsFile.path).then((nativeDebugSymbolsPath) => {
+            attemptAction(5, (accept, reject) => {
+              const nativeDebugSymbolsStream = fs.createReadStream(nativeDebugSymbolsPath);
+              play.edits.deobfuscationfiles.upload({
+                editId: editId,
+                deobfuscationFileType: 'nativeCode',
+                apkVersionCode: uploadedApk.data.versionCode,
+                media: {
+                  mimeType: ZIP_MIME_TYPE,
+                  body: nativeDebugSymbolsStream
+                }
+              })
+              .then(accept)
+              .catch(reject);
+            }, (e, attemptNo) => {
+              console.log('[RETRY]', 'Trying again to upload native-debug-symbols.zip, attemptNo:', attemptNo, e);
             }).then((uploadedNativeDebugSymbols) => {
-              nativeDebugSymbolsStream.close();
-              console.log('native-debug-symbols.zip uploaded', variant, JSON.stringify(uploadedNativeDebugSymbols));
+              console.log('[!!!]', 'native-debug-symbols.zip uploaded', variant, JSON.stringify(uploadedNativeDebugSymbols));
               const mappingStream = fs.createReadStream(files.mappingFile.path);
               play.edits.deobfuscationfiles.upload({
                 editId: editId,
