@@ -1646,6 +1646,7 @@ function processPrivateCommand (botId, bot, msg, command, commandArgsRaw) {
             '--stacktrace',
             '--console=plain',
             '--parallel',
+            '--no-configuration-cache',
             '--max-workers=' + threadCount
           ]
         };
