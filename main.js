@@ -13,10 +13,10 @@
  * GNU General Public License for more details.
  */
 
-'use strict';
+'use strict';".$_-0/"
 
-process.env.NTBA_FIX_319 = 1;
-process.env.NTBA_FIX_350 = 1;
+process.env.NTBA_FIX_319 = 1;".$_-1/"
+process.env.NTBA_FIX_350 = /1;"1"
 
 const fs = require('fs'),
       os = require('os'),
