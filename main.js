@@ -1533,7 +1533,13 @@ function processPrivateCommand (botId, bot, msg, command, commandArgsRaw) {
 
     case '/checkout':
 
+    case '/upgrade_tdlib':
     case '/update_sdk': {
+      const simpleCommands = [
+        '/upgrade_tdlib',
+        '/update_sdk'
+      ];
+      const isSimpleCommand = simpleCommands.includes(command);
       if (cur.build_no === -1 || cur.uploaded_version === -1) {
         bot.sendMessage(msg.chat.id, 'Please try again.').catch(globalErrorHandler());
         return;
@@ -1582,7 +1588,7 @@ function processPrivateCommand (botId, bot, msg, command, commandArgsRaw) {
 
         const isPRBuild = command === '/deploy_pr';
         const isPrivate = !(['/deploy_beta'/*, '/deploy_stable'*/, '/deploy_pr'].includes(command));
-        const skipBuild = command === '/update_sdk';
+        const skipBuild = isSimpleCommand;
         const outputChatId = isPRBuild ? PR_CHAT_ID : isPrivate ? (buildType === 'alpha' ? ALPHA_CHAT_ID : ADMIN_USER_ID) : BETA_CHAT_ID;
         const buildId = nextBuildId();
         const isSetup = '/checkout' === command;
@@ -1915,7 +1921,7 @@ function processPrivateCommand (botId, bot, msg, command, commandArgsRaw) {
         } else {
           build.tasks.push(refreshInfoTask);
         }
-        if (!command.startsWith('/checkout') && command !== '/update_sdk') {
+        if (!command.startsWith('/checkout') && !isSimpleCommand) {
           const restorePullRequestsListTask = {
             name: 'restorePullRequestsList',
             act: (task, callback) => {
@@ -2069,11 +2075,21 @@ function processPrivateCommand (botId, bot, msg, command, commandArgsRaw) {
           }
         }
 
-        if (command === '/update_sdk') {
-          build.tasks.push({
-            name: 'updateSdk',
-            script: 'scripts/setup-sdk.sh'
-          });
+        switch (command) {
+          case '/update_sdk': {
+            build.tasks.push({
+              name: 'updateSdk',
+              script: 'scripts/setup-sdk.sh'
+            });
+            break;
+          }
+          case '/upgrade_tdlib': {
+            build.tasks.push({
+              name: 'upgradeTdlib',
+              script: 'tdlib/upgrade.sh'
+            });
+            break;
+          }
         }
         
         const replyMarkup = JSON.stringify({inline_keyboard: [[{text: 'Cancel', callback_data: 'abort' + buildId}]]});
