@@ -1563,7 +1563,7 @@ function processPrivateCommand (botId, bot, msg, command, commandArgsRaw) {
 
         const buildType = command === '/build' ? 'all' : command.includes('_') ? command.substring(command.indexOf('_') + 1) : command.substring(1);
 
-        const allVariants = ['universal', 'arm64', 'arm32', 'x64', 'x86'];
+        const allVariants = ['universal', 'arm64', 'arm32', 'x64'/*, 'x86'*/];
 
         let specificVariant = buildType;
         if (!allVariants.includes(specificVariant)) {
