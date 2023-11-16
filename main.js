@@ -1,6 +1,6 @@
 /*
  * This file is a part of Telegram X Publisher
- * Copyright © Vyacheslav Krylov (slavone@protonmail.ch) 2022
+ * Copyright © Vyacheslav Krylov (tgx-android@pm.me) 2022-2023
  *
  * This program is free software; you can redistribute it and/or modify
  * it under the terms of the GNU General Public License as published by
@@ -1749,10 +1749,18 @@ function processPrivateCommand (botId, bot, msg, command, commandArgsRaw) {
           const updateSettingsTask = {
             name: 'updateSettings',
             act: (task, callback) => {
+              let marketUrls = '';
+              if (settings.app.market_url) {
+                for (const key in settings.app.market_url) {
+                  const marketUrl = settings.app.market_url[key];
+                  marketUrls += 'app.' + key + '_download_url=' + marketUrl + '\n';
+                }
+              }
               let properties = 'sdk.dir=' + settings.ANDROID_SDK_ROOT + '\n' +
                 'keystore.file=' + settings.TGX_KEYSTORE_PATH + '\n' +
-                'app.download_url=' + settings.app.download_url + '\n' +
                 'app.sources_url=' + settings.app.sources_url + '\n' +
+                'app.download_url=' + settings.app.download_url + '\n' +
+                marketUrls +
                 'telegram.api_id=' + settings.telegram.app.api_id + '\n' +
                 'telegram.api_hash=' + settings.telegram.app.api_hash + '\n' +
                 'youtube.api_key=' + settings.youtube.api_key + '\n';

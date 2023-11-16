@@ -3,7 +3,12 @@
     "id": "org.thunderdog.challegram",
     "name": "Telegram X",
     "download_url": "https://telegram.org/dlx",
-    "sources_url": "https://github.com/TGX-Android/Telegram-X"
+    "sources_url": "https://github.com/TGX-Android/Telegram-X",
+    "market_url": {
+      "google": "https://play.google.com/store/apps/details?id=org.thunderdog.challegram",
+      "galaxy": "https://apps.samsung.com/appquery/appDetail.as?appId=org.thunderdog.challegram",
+      "huawei": "https://appgallery.huawei.com/app/C101754199"
+    }
   },
   "server_verbosity": 0,
   "modify_debug_symbols": false,
