@@ -2094,7 +2094,11 @@ function processPrivateCommand (botId, bot, msg, command, commandArgsRaw) {
           case '/upgrade_tdlib': {
             build.tasks.push({
               name: 'upgradeTdlib',
-              script: 'tdlib/upgrade.sh'
+              script: 'tdlib/upgrade.sh',
+              args: [
+                settings.github.username,
+                settings.github.access_token
+              ]
             });
             break;
           }

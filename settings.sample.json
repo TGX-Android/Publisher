@@ -44,5 +44,9 @@
     "verifier": {
       "production": "bot token of verifier bot to run on production machine"
     }
+  },
+  "github": {
+    "username": "GitHub bot username",
+    "access_token": "GitHub bot access_token"
   }
 }
