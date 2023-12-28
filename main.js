@@ -26,7 +26,8 @@ const fs = require('fs'),
       https = require('https'),
       http = require('http'),
       iconv = require('iconv-lite'),
-      AdmZip = require('adm-zip');
+      AdmZip = require('adm-zip'),
+      FormData = require('form-data');
 const { spawn, exec, execSync } = require('child_process');
 const { google } = require('googleapis');
 const { Level } = require('level');
@@ -378,6 +379,36 @@ function getLocalChanges (callback) {
     }
     const changes = trimIndent(stdout).trim();
     callback(changes && changes.length ? changes : null);
+  });
+}
+
+function postHttp (url, jsonData, needBinary, httpOptions, method) {
+  return new Promise((accept, reject) => {
+    const parsed = new URL(url);
+    const protocol = (parsed.protocol === 'https:' ? https : http);
+    try {
+      const postData = JSON.stringify(jsonData);
+      const options = Object.assign({
+        host: parsed.host,
+        path: parsed.pathname + parsed.search,
+        method: (method || 'POST'),
+        headers: {
+          'Content-Type': 'application/json',
+          'Content-Length': Buffer.byteLength(postData),
+        }
+      }, httpOptions || {});
+
+      const req = protocol.request(options, (res) => {
+        toUtf8(res, (contentType, content) => {
+          accept({statusCode: res.statusCode, statusMessage: res.statusMessage, content, contentType});
+        }, needBinary);
+      }).on('error', reject);
+      req.write(postData);
+      req.end();
+    } catch (e) {
+      console.error('Cannot fetch', url, e);
+      reject(e);
+    }
   });
 }
 
@@ -1154,8 +1185,8 @@ async function attemptAction (maxAttemptsCount, act, onRetry) {
   throw error;
 }
 
-function uploadToGooglePlay (task, build, onDone) {
-  if (LOCAL || !build.files || !build.variants || !build.googlePlayTrack) {
+function prepareForPublishing (task, build, onDone) {
+  if (LOCAL || !build.files || !build.variants) {
     onDone(1);
     return;
   }
@@ -1167,146 +1198,26 @@ function uploadToGooglePlay (task, build, onDone) {
 
     // at this point we are sure that no apks were uploaded yet
 
-    play.edits.insert().then((appEdit) => {
-      console.log('Created an AppEdit', JSON.stringify(appEdit));
-      const editId = appEdit.data.id;
+    const releaseNotes = [];
 
-      let remainingApkCount = build.variants.length;
-      const uploadedVersionCodes = [];
-      let onBuildUploaded = (uploadedBuildVariant) => {
-        if (--remainingApkCount !== 0)
-          return;
-
-        const releaseNotes = [];
-
-        const changeLogVersionName = build.version.name + (
-          build.googlePlayTrack !== 'production' ?
-            ' ' + build.googlePlayTrack :
-            ''
-        );
-        let changeLogText = changeLogVersionName + '\n\n' + 'https://t.me/tgx_android';
-        const fromToCommit = getFromToCommit(build, true);
-        if (fromToCommit) {
-          changeLogText += '\n\nChanges from ' + fromToCommit.from_version.name + ':\n';
-          changeLogText += build.git.remoteUrl + '/compare/' + fromToCommit.commit_range;
-        }
-        releaseNotes.push({
-          language: 'en-US',
-          text: changeLogText
-        });
-
-        // Setting track
-        play.edits.tracks.update({
-          editId: editId,
-          track: build.googlePlayTrack,
-          // changesNotSentForReview: true,
-          requestBody: {
-            track: build.googlePlayTrack,
-            releases: [{
-              name: build.version.name + ' ' + build.googlePlayTrack,
-              status: build.googlePlayTrack === 'production' ? 'draft' : 'completed',
-              releaseNotes,
-              versionCodes: uploadedVersionCodes
-            }]
-          }
-        }).then((updatedTrack) => {
-          console.log('Successfully updated track', JSON.stringify(updatedTrack));
-          play.edits.commit({
-            editId: editId
-          }).then((appEdit) => {
-            console.log('Successfully commited google play changes', JSON.stringify(appEdit));
-            tracePublishedGooglePlayBuild(build).then(() => {
-              onDone(0);
-            });
-          }).catch((e) => {
-            console.error('Failed to commit changes to google play', build.googlePlayTrack, e);
-            onDone(1);
-          });
-        }).catch((updatedTrackError) => {
-          console.error('Failed to update track', build.googlePlayTrack, updatedTrackError);
-          onDone(1);
-        });
-      };
-      for (let i = 0; i < build.variants.length; i++) {
-        const variant = build.variants[i];
-        if (build.variants.length > 1 && variant === 'universal') {
-          onBuildUploaded(variant);
-          continue;
-        }
-        const files = build.files[variant];
-        const apkStream = fs.createReadStream(files.apkFile.path);
-
-        play.edits.apks.upload({
-          editId: editId,
-          media: {
-            mimeType: APK_MIME_TYPE,
-            body: apkStream
-          }
-        }).then((uploadedApk) => {
-          console.log('Successfully uploaded APK', JSON.stringify(uploadedApk));
-          traceMaxApkVersionCode(variant, uploadedApk.data.versionCode, new Date());
-          if (uploadedApk.data.binary.sha256 !== files.apkFile.checksum.sha256) {
-            console.error('SHA-256 mismatch!', variant);
-            task.logPublicly('SHA-256 mismatch!');
-            onDone(1);
-            return;
-          }
-          uploadedVersionCodes.push(uploadedApk.data.versionCode);
-          modifyNativeDebugSymbolsArchive(files.nativeDebugSymbolsFile.path).then((nativeDebugSymbolsPath) => {
-            attemptAction(5, (accept, reject) => {
-              const nativeDebugSymbolsStream = fs.createReadStream(nativeDebugSymbolsPath);
-              play.edits.deobfuscationfiles.upload({
-                editId: editId,
-                deobfuscationFileType: 'nativeCode',
-                apkVersionCode: uploadedApk.data.versionCode,
-                media: {
-                  mimeType: ZIP_MIME_TYPE,
-                  body: nativeDebugSymbolsStream
-                }
-              })
-              .then(accept)
-              .catch(reject);
-            }, (e, attemptNo) => {
-              console.log('[RETRY]', 'Trying again to upload native-debug-symbols.zip, attemptNo:', attemptNo, e);
-            }).then((uploadedNativeDebugSymbols) => {
-              console.log('[!!!]', 'native-debug-symbols.zip uploaded', variant, JSON.stringify(uploadedNativeDebugSymbols));
-              const mappingStream = fs.createReadStream(files.mappingFile.path);
-              play.edits.deobfuscationfiles.upload({
-                editId: editId,
-                deobfuscationFileType: 'proguard',
-                apkVersionCode: uploadedApk.data.versionCode,
-                media: {
-                  mimeType: TXT_MIME_TYPE,
-                  body: mappingStream
-                }
-              }).then((uploadedMappingFile) => {
-                mappingStream.close();
-                console.log('Mapping file uploaded', variant, JSON.stringify(uploadedMappingFile));
-                // Success! Now we can proceed.
-                onBuildUploaded(variant);
-              }).catch((mappingFileUploadError) => {
-                console.error('Failed to upload mapping file.', variant, mappingFileUploadError);
-                onDone(1);
-              });
-            }).catch((nativeDebugSymbolsUploadError) => {
-              console.error('Failed to upload native-debug-symbols.zip', variant, nativeDebugSymbolsUploadError);
-              onDone(1);
-            });
-          });
-        }).catch((apkUploadError) => {
-          console.error('Failed to upload apk', variant, apkUploadError);
-          onDone(1);
-        });
-
-        /*media: {
-          mimeType: ,
-          body: apk
-        }*/
-      }
-    }).catch((appEditError) => {
-      console.error('Failed to create AppEdit', appEditError);
-      onDone(1);
+    const changeLogVersionName = build.version.name + (
+      build.googlePlayTrack && build.googlePlayTrack !== 'production' ?
+        ' ' + build.googlePlayTrack :
+        ''
+    );
+    let changeLogText = changeLogVersionName + '\n\n' + 'https://t.me/tgx_android';
+    const fromToCommit = getFromToCommit(build, true);
+    if (fromToCommit) {
+      changeLogText += '\n\nChanges from ' + fromToCommit.from_version.name + ':\n';
+      changeLogText += build.git.remoteUrl + '/compare/' + fromToCommit.commit_range;
+    }
+    releaseNotes.push({
+      language: 'en-US', // TODO more languages via translations.telegram.org
+      text: changeLogText
     });
+    build.releaseNotes = releaseNotes;
+
+    onDone(0);
   };
 
   for (let i = 0; i < build.variants.length; i++) {
@@ -1333,6 +1244,326 @@ function uploadToGooglePlay (task, build, onDone) {
       }
     });
   }
+
+  return async () => {
+    if (!task.endTime) {
+      // TODO abort upload somehow??
+
+      onDone(1);
+    }
+  };
+}
+
+function uploadToGooglePlay (task, build, onDone) {
+  play.edits.insert().then((appEdit) => {
+    console.log('Created an AppEdit', JSON.stringify(appEdit));
+    const editId = appEdit.data.id;
+
+    let remainingApkCount = build.variants.length;
+    const uploadedVersionCodes = [];
+    let onBuildUploaded = (uploadedBuildVariant) => {
+      if (--remainingApkCount !== 0)
+        return;
+
+      // Setting track
+      play.edits.tracks.update({
+        editId: editId,
+        track: build.googlePlayTrack,
+        // changesNotSentForReview: true,
+        requestBody: {
+          track: build.googlePlayTrack,
+          releases: [{
+            name: build.version.name + ' ' + build.googlePlayTrack,
+            status: build.googlePlayTrack === 'production' ? 'draft' : 'completed',
+            releaseNotes: build.releaseNotes,
+            versionCodes: uploadedVersionCodes
+          }]
+        }
+      }).then((updatedTrack) => {
+        console.log('Successfully updated track', JSON.stringify(updatedTrack));
+        play.edits.commit({
+          editId: editId
+        }).then((appEdit) => {
+          console.log('Successfully commited google play changes', JSON.stringify(appEdit));
+          tracePublishedGooglePlayBuild(build).then(() => {
+            onDone(0);
+          });
+        }).catch((e) => {
+          console.error('Failed to commit changes to google play', build.googlePlayTrack, e);
+          onDone(1);
+        });
+      }).catch((updatedTrackError) => {
+        console.error('Failed to update track', build.googlePlayTrack, updatedTrackError);
+        onDone(1);
+      });
+    };
+    for (let i = 0; i < build.variants.length; i++) {
+      const variant = build.variants[i];
+      if (build.variants.length > 1 && variant === 'universal') {
+        onBuildUploaded(variant);
+        continue;
+      }
+      const files = build.files[variant];
+      const apkStream = fs.createReadStream(files.apkFile.path);
+
+      play.edits.apks.upload({
+        editId: editId,
+        media: {
+          mimeType: APK_MIME_TYPE,
+          body: apkStream
+        }
+      }).then((uploadedApk) => {
+        console.log('Successfully uploaded APK', JSON.stringify(uploadedApk));
+        traceMaxApkVersionCode(variant, uploadedApk.data.versionCode, new Date());
+        if (uploadedApk.data.binary.sha256 !== files.apkFile.checksum.sha256) {
+          console.error('SHA-256 mismatch!', variant);
+          task.logPublicly('SHA-256 mismatch!');
+          onDone(1);
+          return;
+        }
+        uploadedVersionCodes.push(uploadedApk.data.versionCode);
+        modifyNativeDebugSymbolsArchive(files.nativeDebugSymbolsFile.path).then((nativeDebugSymbolsPath) => {
+          attemptAction(5, (accept, reject) => {
+            const nativeDebugSymbolsStream = fs.createReadStream(nativeDebugSymbolsPath);
+            play.edits.deobfuscationfiles.upload({
+              editId: editId,
+              deobfuscationFileType: 'nativeCode',
+              apkVersionCode: uploadedApk.data.versionCode,
+              media: {
+                mimeType: ZIP_MIME_TYPE,
+                body: nativeDebugSymbolsStream
+              }
+            })
+            .then(accept)
+            .catch(reject);
+          }, (e, attemptNo) => {
+            console.log('[RETRY]', 'Trying again to upload native-debug-symbols.zip, attemptNo:', attemptNo, e);
+          }).then((uploadedNativeDebugSymbols) => {
+            console.log('[!!!]', 'native-debug-symbols.zip uploaded', variant, JSON.stringify(uploadedNativeDebugSymbols));
+            const mappingStream = fs.createReadStream(files.mappingFile.path);
+            play.edits.deobfuscationfiles.upload({
+              editId: editId,
+              deobfuscationFileType: 'proguard',
+              apkVersionCode: uploadedApk.data.versionCode,
+              media: {
+                mimeType: TXT_MIME_TYPE,
+                body: mappingStream
+              }
+            }).then((uploadedMappingFile) => {
+              mappingStream.close();
+              console.log('Mapping file uploaded', variant, JSON.stringify(uploadedMappingFile));
+              // Success! Now we can proceed.
+              onBuildUploaded(variant);
+            }).catch((mappingFileUploadError) => {
+              console.error('Failed to upload mapping file.', variant, mappingFileUploadError);
+              onDone(1);
+            });
+          }).catch((nativeDebugSymbolsUploadError) => {
+            console.error('Failed to upload native-debug-symbols.zip', variant, nativeDebugSymbolsUploadError);
+            onDone(1);
+          });
+        });
+      }).catch((apkUploadError) => {
+        console.error('Failed to upload apk', variant, apkUploadError);
+        onDone(1);
+      });
+
+      /*media: {
+        mimeType: ,
+        body: apk
+      }*/
+    }
+  }).catch((appEditError) => {
+    console.error('Failed to create AppEdit', appEditError);
+    onDone(1);
+  });
+
+  return async () => {
+    if (!task.endTime) {
+      // TODO abort upload somehow??
+
+      onDone(1);
+    }
+  };
+}
+
+async function obtainHuaweiAccessToken () {
+  try {
+    const data = {
+      client_id: settings.huawei.client_id,
+      client_secret: settings.huawei.key,
+      grant_type: 'client_credentials'
+    };
+    const response = await postHttp('https://connect-api.cloud.huawei.com/api/oauth2/v1/token', data, false, {
+      'User-Agent': 'Telegram-X-Publisher'
+    });
+    if (response.statusCode < 200 || response.statusCode >= 300) {
+      console.error('AGC auth failed', response.statusCode, response.statusMessage, response.contentType, response.content);
+      return null;
+    }
+    return JSON.parse(response.content);
+  } catch (e) {
+    console.error('Failed to obtain AGC credentials', e);
+    return null;
+  }
+}
+
+async function obtainHuaweiUploadUrl (accessToken, needPhasedRelease) {
+  try {
+    const response = await fetchHttp(
+      'https://connect-api.cloud.huawei.com/api/publish/v2/upload-url' +
+      '?appId=' + settings.huawei.app_id + 
+      '&suffix=apk' +
+      '&releaseType=' + (needPhasedRelease ? 3 : 1), false, {
+        headers: {
+          'client_id': settings.huawei.client_id,
+          'Authorization': 'Bearer ' + accessToken,
+          'User-Agent': 'Telegram-X-Publisher'
+        }
+      }
+    );
+    if (response.statusCode < 200 || response.statusCode >= 300) {
+      console.error('AGC obtain upload URL failed', response.statusCode, response.statusMessage, response.contentType, response.content);
+      return null;
+    }
+    return JSON.parse(response.content);
+  } catch (e) {
+    console.error('Failed to obtain AGC upload URL', e);
+    return null;
+  }
+}
+
+function postHuaweiForm (url, form, needBinary) {
+  return new Promise((accept, reject) => {
+    const parsed = new URL(url);
+    const protocol = (parsed.protocol === 'https:' ? https : http);
+    const options = {
+      host: parsed.host,
+      path: parsed.pathname + parsed.search,
+      method: 'POST',
+      headers: Object.assign(form.getHeaders(), {
+        'accept': 'application/json',
+        'User-Agent': 'Telegram-X-Publisher'
+      })
+    };
+    const req = protocol.request(options, (res) => {
+      toUtf8(res, (contentType, content) => {
+        accept({statusCode: res.statusCode, statusMessage: res.statusMessage, content, contentType});
+      }, needBinary);
+    }).on('error', reject);
+    form.pipe(req);
+  });
+}
+
+async function uploadHuaweiApk (build, targetFiles, accessToken, uploadUrl, authCode) {
+  const apkFilePath = targetFiles.apkFile.path;
+  try {
+    const apkFileStream = fs.createReadStream(apkFilePath);
+    const form = new FormData();
+    form.append('file', apkFileStream);
+    form.append('authCode', authCode);
+    form.append('fileCount', '1');
+    const response = await postHuaweiForm(uploadUrl, form);
+    if (response.statusCode !== 200) {
+      console.error('AGC upload failed', response.statusCode, response.statusMessage, response.contentType, response.content);
+      return null;
+    }
+    return JSON.parse(response.content);
+  } catch (e) {
+    console.error('Failed to upload huawei APK', e);
+    return null;
+  }
+}
+
+async function submitHuaweiUpdate (build, targetFiles, accessToken, fileInfo) {
+  try {
+    const apiUrl = 'https://connect-api.cloud.huawei.com/api/publish/v2/app-file-info' +
+      '?appId=' + settings.huawei.app_id;
+    const data = {
+      fileType: 5,
+      files: [{
+        fileName: build.version.name + '.' + build.git.commit.short + '.apk',
+        // The typo in the second "URL" (ULR) is intended ...
+        fileDestUrl: fileInfo.fileDestUlr
+      }]
+    };
+    const response = await postHttp(apiUrl, data, false, {
+      headers: {
+        'client_id': settings.huawei.client_id,
+        'Authorization': 'Bearer ' + accessToken,
+        'User-Agent': 'Telegram-X-Publisher'
+      }
+    }, 'PUT');
+    if (response.statusCode !== 200) {
+      console.error('AGC update failed', response.statusCode, response.statusMessage, response.contentType, response.content);
+      return null;
+    }
+    return JSON.parse(response.content);
+  } catch (e) {
+    console.error('Failed to publish AGC update', e);
+    return null;
+  }
+}
+
+function uploadToHuaweiAppGallery (task, build, onDone) {
+  (async () => {
+    const targetFiles = build.files['huawei'] || build.files['universal'];
+    // Step 1. Obtain access_token
+    const auth = await obtainHuaweiAccessToken();
+    if (!auth || !auth.access_token) {
+      onDone(1);
+      return;
+    }
+    // Step 2. Obtain upload_url
+    const upload = await obtainHuaweiUploadUrl(auth.access_token);
+    if (!upload || !upload.uploadUrl || !upload.authCode) {
+      onDone(1);
+      return;
+    }
+    // Step 3. Upload APK to the provided URL
+    const uploadedFile = await uploadHuaweiApk(
+      build,
+      targetFiles,
+      auth.access_token,
+      upload.uploadUrl,
+      upload.authCode
+    );
+    if (!uploadedFile) {
+      onDone(1);
+      return;
+    }
+    const fileInfo = uploadedFile.result.UploadFileRsp.fileInfoList[0];
+
+    // Step 4. Publish an update with the uploaded APK
+    const submittedUpdate = await submitHuaweiUpdate(
+      build,
+      targetFiles,
+      auth.access_token,
+      fileInfo
+    );
+    if (!submittedUpdate) {
+      onDone(1);
+      return;
+    }
+
+    console.log('Successfully published Huawei AppGallery', JSON.stringify(submittedUpdate));
+    onDone(0);
+  })();
+
+  return async () => {
+    if (!task.endTime) {
+      // TODO abort upload somehow??
+
+      onDone(1);
+    }
+  };
+}
+
+function uploadToGithub (task, build, onDone) {
+  // TODO:
+  // 1. Delete previous beta, if it was published
+  // 2. Publish WIP/stable release
+  onDone(0);
 
   return async () => {
     if (!task.endTime) {
@@ -1520,6 +1751,8 @@ function processPrivateCommand (botId, bot, msg, command, commandArgsRaw) {
       break;
     }
     case '/deploy_stable':
+    case '/deploy_huawei':
+    case '/deploy_github':
     case '/deploy_beta':
     case '/deploy_alpha': // same as universal
     case '/deploy_pr':
@@ -1529,6 +1762,7 @@ function processPrivateCommand (botId, bot, msg, command, commandArgsRaw) {
     case '/build_arm64':
     case '/build_x86':
     case '/build_x64':
+    case '/build_huawei':
     case '/build_universal':
 
     case '/checkout':
@@ -1563,11 +1797,16 @@ function processPrivateCommand (botId, bot, msg, command, commandArgsRaw) {
 
         const buildType = command === '/build' ? 'all' : command.includes('_') ? command.substring(command.indexOf('_') + 1) : command.substring(1);
 
+        // TODO huawei flavor with HPS instead of FCM
         const allVariants = ['universal', 'arm64', 'arm32', 'x64'/*, 'x86'*/];
 
         let specificVariant = buildType;
         if (!allVariants.includes(specificVariant)) {
-          specificVariant = null;
+          if (buildType === 'all') {
+            specificVariant = null;
+          } else if (buildType === 'huawei') {
+            specificVariant = 'universal';
+          }
         }
 
         const commandArgsList = commandArgsRaw ? commandArgsRaw.split(/[,\s]+/) : [];
@@ -1616,6 +1855,8 @@ function processPrivateCommand (botId, bot, msg, command, commandArgsRaw) {
           git: _gitData,
           serviceChatId: msg.chat.id,
           googlePlayTrack: buildType === 'stable' ? 'production' : ['beta', 'alpha'].includes(buildType) ? buildType : null,
+          huaweiTrack: (buildType === 'stable' && settings.huawei.enabled) || command === '/deploy_huawei' ? 'production' : buildType === 'beta' ? buildType : null,
+          githubTrack: (buildType === 'stable' && settings.github.enabled) || command === '/deploy_github' ? 'production' : buildType === 'beta' ? buildType : null,
           files: {}
         };
         if (pullRequestsMetadata && pullRequestsMetadata.length) {
@@ -1853,6 +2094,7 @@ function processPrivateCommand (botId, bot, msg, command, commandArgsRaw) {
           const currentBranch = commandArgs.branch || 'main';
           const checkoutTask = {
             name: 'checkout' + (currentBranch !== 'main' ? 'Branch' : ''),
+            description: 'checkout',
             cmd: '(git reset -q --hard || true) && \
                  (git checkout -q -- . || true) && \
                  (git fetch origin -q || true) && \
@@ -1877,6 +2119,7 @@ function processPrivateCommand (botId, bot, msg, command, commandArgsRaw) {
 
               const preparePrTask = {
                 name: 'fetchPr-' + pullRequestId + (pullRequest.commit ? ':' + pullRequest.commit : ''),
+                description: 'fetch_pr',
                 cmd: '(git branch -D pr-' + pullRequestId + ' || true) && \
                       ' + (commandArgs.force ?
                             '(git fetch -f origin pull/' + pullRequestId + '/head:pr-' + pullRequestId + ' || git rev-parse --quiet --verify pr-' + pullRequestId + ')' :
@@ -1913,6 +2156,7 @@ function processPrivateCommand (botId, bot, msg, command, commandArgsRaw) {
 
               const squashPrTask = {
                 name: 'squashPr-' + pullRequestId,
+                description: 'squash_pr',
                 cmd: 'git merge ' + currentBranch + ' -m "Sync with ' + currentBranch + '" && \
                       git checkout ' + currentBranch + ' && \
                       ' + (isSecondary ? 'git stash pop &&' : '') + ' \
@@ -2056,7 +2300,7 @@ function processPrivateCommand (botId, bot, msg, command, commandArgsRaw) {
                 act: (task, callback) => {
                   return publishToTelegram(bot, task, build, callback, isPRBuild ? INTERNAL_CHAT_ID : ALPHA_CHAT_ID, true, false);
                 }
-              })
+              });
             }
           });
 
@@ -2072,14 +2316,47 @@ function processPrivateCommand (botId, bot, msg, command, commandArgsRaw) {
             });
           }
 
-          if (!LOCAL && build.googlePlayTrack) {
+          if (!LOCAL && (build.googlePlayTrack || build.huaweiTrack || build.githubTrack)) {
             build.tasks.push({
-              name: 'publishGooglePlay' + ucfirst(build.googlePlayTrack) + (build.googlePlayTrack === 'production' ? 'Draft' : ''),
-              isAsync: true,
+              name: 'prepareForPublishing',
+              needsAwait: true,
               act: (task, callback) => {
-                return uploadToGooglePlay(task, build, callback);
+                return prepareForPublishing(task, build, callback);
               }
             });
+
+            if (build.googlePlayTrack) {
+              const uploadTaskSuffix = ucfirst(build.googlePlayTrack) + (build.googlePlayTrack === 'production' ? 'Draft' : ''); 
+              build.tasks.push({
+                name: 'publishGooglePlay' + uploadTaskSuffix,
+                isAsync: true,
+                act: (task, callback) => {
+                  return uploadToGooglePlay(task, build, callback);
+                }
+              });
+            }
+
+            if (build.huaweiTrack) {
+              const uploadTaskSuffix = build.huaweiTrack !== 'production' ? ucfirst(build.huaweiTrack) : '';
+              build.tasks.push({
+                name: 'publishHuaweiAppGallery' + uploadTaskSuffix,
+                isAsync: true,
+                act: (task, callback) => {
+                  return uploadToHuaweiAppGallery(task, build, callback);
+                }
+              })
+            }
+
+            if (build.githubTrack) {
+              const uploadTaskSuffix = build.githubTrack !== 'production' ? ucfirst(build.githubTrack) : '';
+              build.tasks.push({
+                name: 'publishGithub' + uploadTaskSuffix,
+                isAsync: true,
+                act: (task, callback) => {
+                  return uploadToGithub(task, build, callback);
+                }
+              });
+            }
           }
         }
 
@@ -2424,10 +2701,11 @@ function processPrivateCommand (botId, bot, msg, command, commandArgsRaw) {
               if (task.cmd || task.script) {
                 if (task.script) {
                   const args = task.args ? [task.script, ...task.args] : [task.script];
+                  console.log('Running script', task.script);
                   task.process = spawn('/bin/bash', args, {cwd: settings.TGX_SOURCE_PATH});
                 } else {
                   const command = task.cmd + (task.args ? ' ' + task.args.join(' ') : '');
-                  console.log('Executing command', command);
+                  console.log('Executing bash -c', task.description || '...');
                   task.process = spawn('/bin/bash', ['-c', command], {cwd: settings.TGX_SOURCE_PATH});
                 }
                 task.process.stdout.on('data', (data) => {

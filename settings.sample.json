@@ -32,6 +32,12 @@
   "youtube": {
     "api_key": "YouTube api key"
   },
+  "huawei": {
+    "enabled": false,
+    "app_id": "<AppGallery App ID>",
+    "client_id": "<AppGallery Connect API client_id>",
+    "key": "<AppGallery Connect API secret>"
+  },
   "url": {
     "testing": "https://play.google.com/apps/testing/org.thunderdog.challegram",
     "market": "https://play.google.com/store/apps/details?id=org.thunderdog.challegram"
@@ -46,6 +52,7 @@
     }
   },
   "github": {
+    "enabled": false,
     "username": "GitHub bot username",
     "access_token": "GitHub bot access_token"
   }
