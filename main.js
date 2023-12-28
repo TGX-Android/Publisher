@@ -1200,16 +1200,17 @@ function prepareForPublishing (task, build, onDone) {
 
     const releaseNotes = [];
 
-    const changeLogVersionName = build.version.name + (
-      build.googlePlayTrack && build.googlePlayTrack !== 'production' ?
-        ' ' + build.googlePlayTrack :
-        ''
-    );
+    const changeLogVersionName = build.version.name;
     let changeLogText = changeLogVersionName + '\n\n' + 'https://t.me/tgx_android';
     const fromToCommit = getFromToCommit(build, true);
+    const viewSourceUrl = build.git.remoteUrl + '/tree/' + build.git.commit.long;
     if (fromToCommit) {
+      const diffUrl = build.git.remoteUrl + '/compare/' + fromToCommit.commit_range;
       changeLogText += '\n\nChanges from ' + fromToCommit.from_version.name + ':\n';
-      changeLogText += build.git.remoteUrl + '/compare/' + fromToCommit.commit_range;
+      changeLogText += diffUrl;
+      build.fallbackReleaseNotes = diffUrl;
+    } else {
+      build.fallbackReleaseNotes = 'This version is based on this source code: ' + viewSourceUrl;
     }
     releaseNotes.push({
       language: 'en-US', // TODO more languages via translations.telegram.org
@@ -1395,7 +1396,9 @@ async function obtainHuaweiAccessToken () {
       grant_type: 'client_credentials'
     };
     const response = await postHttp('https://connect-api.cloud.huawei.com/api/oauth2/v1/token', data, false, {
-      'User-Agent': 'Telegram-X-Publisher'
+      headers: {
+        'User-Agent': 'Telegram-X-Publisher'
+      }
     });
     if (response.statusCode < 200 || response.statusCode >= 300) {
       console.error('AGC auth failed', response.statusCode, response.statusMessage, response.contentType, response.content);
@@ -1475,14 +1478,15 @@ async function uploadHuaweiApk (build, targetFiles, accessToken, uploadUrl, auth
   }
 }
 
-async function submitHuaweiUpdate (build, targetFiles, accessToken, fileInfo) {
+async function updateHuaweiAppFileInfo (build, targetFiles, accessToken, fileInfo) {
   try {
     const apiUrl = 'https://connect-api.cloud.huawei.com/api/publish/v2/app-file-info' +
       '?appId=' + settings.huawei.app_id;
+    const fileName = build.version.name + '.' + build.git.commit.short + '.apk';
     const data = {
       fileType: 5,
       files: [{
-        fileName: build.version.name + '.' + build.git.commit.short + '.apk',
+        fileName: fileName,
         // The typo in the second "URL" (ULR) is intended ...
         fileDestUrl: fileInfo.fileDestUlr
       }]
@@ -1501,6 +1505,50 @@ async function submitHuaweiUpdate (build, targetFiles, accessToken, fileInfo) {
     return JSON.parse(response.content);
   } catch (e) {
     console.error('Failed to publish AGC update', e);
+    return null;
+  }
+}
+
+async function updateHuaweiAppLanguageInfo (accessToken, info) {
+  try {
+    const apiUrl = 'https://connect-api.cloud.huawei.com/api/publish/v2/upload-url' +
+      '?appId=' + settings.huawei.app_id;
+    const response = await postHttp(apiUrl, info, false, {
+      headers: {
+        'client_id': settings.huawei.client_id,
+        'Authorization': 'Bearer ' + accessToken,
+        'User-Agent': 'Telegram-X-Publisher'
+      }
+    });
+    if (response.statusCode !== 200) {
+      console.error('AGC update langauge info failed', response.statusCode, response.statusMessage, response.contentType, response.content);
+      return null;
+    }
+    return JSON.parse(response.content);
+  } catch (e) {
+    console.error('Unable to update AGC language info', e);
+    return null;
+  }
+}
+
+async function submitHuaweiAppUpdate (accessToken) {
+  try {
+    const apiUrl = 'https://connect-api.cloud.huawei.com/api/publish/v2/app-submit' +
+      '?appId=' + settings.huawei.app_id;
+    const response = await postHttp(apiUrl, info, false, {
+      headers: {
+        'client_id': settings.huawei.client_id,
+        'Authorization': 'Bearer ' + accessToken,
+        'User-Agent': 'Telegram-X-Publisher'
+      }
+    });
+    if (response.statusCode !== 200) {
+      console.error('AGC update langauge info failed', response.statusCode, response.statusMessage, response.contentType, response.content);
+      return null;
+    }
+    return JSON.parse(response.content);
+  } catch (e) {
+    console.error('Unable to submit AGC app for review', e);
     return null;
   }
 }
@@ -1534,19 +1582,50 @@ function uploadToHuaweiAppGallery (task, build, onDone) {
     }
     const fileInfo = uploadedFile.result.UploadFileRsp.fileInfoList[0];
 
-    // Step 4. Publish an update with the uploaded APK
-    const submittedUpdate = await submitHuaweiUpdate(
+    // Step 4. Update file info
+    const updatedFileInfo = await updateHuaweiAppFileInfo(
       build,
       targetFiles,
       auth.access_token,
       fileInfo
     );
-    if (!submittedUpdate) {
+    if (!updatedFileInfo) {
       onDone(1);
       return;
     }
 
-    console.log('Successfully published Huawei AppGallery', JSON.stringify(submittedUpdate));
+    // Step 5. Update change logs
+    if (build.releaseNotes && build.releaseNotes.length > 0) {
+      for (let index = 0; index < build.releaseNotes.length; index++) {
+        const releaseNotes = build.releaseNotes[index];
+        let changeLogText = releaseNotes.text;
+        if (changeLogText.length > 500) {
+          task.logPrivately(releaseNotes.language + ' did not fit');
+          changeLogText = build.fallbackReleaseNotes || '';
+        }
+        // lang String(64): Language. https://developer.huawei.com/consumer/en/doc/development/AppGallery-connect-References/agcapi-reference-langtype-0000001158245079
+        // appName String(64): App name in a language. This parameter is mandatory when a language type is added.
+        // appDesc String(8000): Full introduction in a language.
+        // briefInfo String(80): Brief introduction in a language.
+        // newFeatures String(500): New features in a language.
+        await updateHuaweiAppLanguageInfo(
+          auth.access_token, {
+            lang: releaseNotes.language,
+            newFeatures: changeLogText
+        });
+      }
+    }
+
+    // Step 6. Submit for review
+    const submittedApp = await submitHuaweiAppUpdate(
+      auth.access_token
+    );
+    if (!submittedApp) {
+      onDone(1);
+      return;
+    }
+
+    console.log('Successfully published Huawei AppGallery');
     onDone(0);
   })();
 
