@@ -1553,7 +1553,7 @@ async function submitHuaweiAppUpdate (accessToken) {
   }
 }
 
-function uploadToHuaweiAppGallery (task, build, onDone) {
+function uploadToHuaweiAppGallery (task, build, onDone, draftOnly) {
   (async () => {
     const targetFiles = build.files['huawei'] || build.files['universal'];
     // Step 1. Obtain access_token
@@ -1617,12 +1617,14 @@ function uploadToHuaweiAppGallery (task, build, onDone) {
     }
 
     // Step 6. Submit for review
-    const submittedApp = await submitHuaweiAppUpdate(
-      auth.access_token
-    );
-    if (!submittedApp) {
-      onDone(1);
-      return;
+    if (!draftOnly) {
+      const submittedApp = await submitHuaweiAppUpdate(
+        auth.access_token
+      );
+      if (!submittedApp) {
+        onDone(1);
+        return;
+      }
     }
 
     console.log('Successfully published Huawei AppGallery');
@@ -1638,7 +1640,7 @@ function uploadToHuaweiAppGallery (task, build, onDone) {
   };
 }
 
-function uploadToGithub (task, build, onDone) {
+function uploadToGithub (task, build, onDone, draftOnly) {
   // TODO:
   // 1. Delete previous beta, if it was published
   // 2. Publish WIP/stable release
@@ -2396,6 +2398,8 @@ function processPrivateCommand (botId, bot, msg, command, commandArgsRaw) {
           }
 
           if (!LOCAL && (build.googlePlayTrack || build.huaweiTrack || build.githubTrack)) {
+            const draftOnly = build.googlePlayTrack === 'production';
+            
             build.tasks.push({
               name: 'prepareForPublishing',
               needsAwait: true,
@@ -2405,7 +2409,7 @@ function processPrivateCommand (botId, bot, msg, command, commandArgsRaw) {
             });
 
             if (build.googlePlayTrack) {
-              const uploadTaskSuffix = ucfirst(build.googlePlayTrack) + (build.googlePlayTrack === 'production' ? 'Draft' : ''); 
+              const uploadTaskSuffix = ucfirst(build.googlePlayTrack) + (draftOnly ? 'Draft' : ''); 
               build.tasks.push({
                 name: 'publishGooglePlay' + uploadTaskSuffix,
                 isAsync: true,
@@ -2416,23 +2420,23 @@ function processPrivateCommand (botId, bot, msg, command, commandArgsRaw) {
             }
 
             if (build.huaweiTrack) {
-              const uploadTaskSuffix = build.huaweiTrack !== 'production' ? ucfirst(build.huaweiTrack) : '';
+              const uploadTaskSuffix = (build.huaweiTrack !== 'production' ? ucfirst(build.huaweiTrack) : '') + (draftOnly ? 'Draft' : '');
               build.tasks.push({
                 name: 'publishHuaweiAppGallery' + uploadTaskSuffix,
                 isAsync: true,
                 act: (task, callback) => {
-                  return uploadToHuaweiAppGallery(task, build, callback);
+                  return uploadToHuaweiAppGallery(task, build, callback, draftOnly);
                 }
               })
             }
 
             if (build.githubTrack) {
-              const uploadTaskSuffix = build.githubTrack !== 'production' ? ucfirst(build.githubTrack) : '';
+              const uploadTaskSuffix = (build.githubTrack !== 'production' ? ucfirst(build.githubTrack) : '') + (draftOnly ? 'Draft' : '');
               build.tasks.push({
                 name: 'publishGithub' + uploadTaskSuffix,
                 isAsync: true,
                 act: (task, callback) => {
-                  return uploadToGithub(task, build, callback);
+                  return uploadToGithub(task, build, callback, draftOnly);
                 }
               });
             }
