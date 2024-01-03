@@ -1894,9 +1894,9 @@ function processPrivateCommand (botId, bot, msg, command, commandArgsRaw) {
 
         let specificVariant = buildType;
         if (!allVariants.includes(specificVariant)) {
-          if (buildType === 'all') {
+          if (['all', 'stable', 'beta', 'alpha'].includes(buildType)) {
             specificVariant = null;
-          } else if (buildType === 'huawei') {
+          } else if (buildType === 'huawei' || buildType === 'github') {
             specificVariant = 'universal';
           }
         }
@@ -1947,8 +1947,8 @@ function processPrivateCommand (botId, bot, msg, command, commandArgsRaw) {
           git: _gitData,
           serviceChatId: msg.chat.id,
           googlePlayTrack: buildType === 'stable' ? 'production' : ['beta', 'alpha'].includes(buildType) ? buildType : null,
-          huaweiTrack: (buildType === 'stable' && settings.huawei.enabled) || command === '/deploy_huawei' ? 'production' : buildType === 'beta' ? buildType : null,
-          githubTrack: (buildType === 'stable' && settings.github.enabled) || command === '/deploy_github' ? 'production' : buildType === 'beta' ? buildType : null,
+          huaweiTrack: (buildType === 'stable' && settings.huawei.enabled) || command === '/deploy_huawei' ? 'production' : (buildType === 'beta' && settings.huawei.enabled) ? buildType : null,
+          githubTrack: (buildType === 'stable' && settings.github.enabled) || command === '/deploy_github' ? 'production' : (buildType === 'beta' && settings.github.enabled) ? buildType : null,
           files: {}
         };
         if (pullRequestsMetadata && pullRequestsMetadata.length) {
