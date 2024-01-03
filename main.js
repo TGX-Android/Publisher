@@ -1641,9 +1641,20 @@ function uploadToHuaweiAppGallery (task, build, onDone, draftOnly) {
 }
 
 function uploadToGithub (task, build, onDone, draftOnly) {
-  // TODO:
-  // 1. Delete previous beta, if it was published
-  // 2. Publish WIP/stable release
+  const isPrerelease = build.githubTrack !== 'production';
+
+  // Prerelease:
+  // 1. Update last prerelease, if it exists
+  // 2. If it doesn't, create new prerelease
+
+  // Production:
+  // 1. Delete last prerelease, if it exists
+  // 2. Delete last release draft, if it exists
+  // 3. Create new release (draft, if draftOnly is true)
+
+  // The APKs to be included: universal, huawei, foss.
+  // For smaller, architecture-specific builds, force refer to @tgx_log
+
   onDone(0);
 
   return async () => {
@@ -2425,7 +2436,7 @@ function processPrivateCommand (botId, bot, msg, command, commandArgsRaw) {
                 name: 'publishHuaweiAppGallery' + uploadTaskSuffix,
                 isAsync: true,
                 act: (task, callback) => {
-                  return uploadToHuaweiAppGallery(task, build, callback, draftOnly);
+                  return uploadToHuaweiAppGallery(task, build, callback, true);
                 }
               })
             }
