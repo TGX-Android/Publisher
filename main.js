@@ -1640,15 +1640,10 @@ function uploadToHuaweiAppGallery (task, build, onDone, draftOnly) {
   };
 }
 
-function uploadToGithub (task, build, onDone, draftOnly) {
-  const isPrerelease = build.githubTrack !== 'production';
-
-  // Prerelease:
-  // 1. Update last prerelease, if it exists
-  // 2. If it doesn't, create new prerelease
+function uploadToGithub (task, build, onDone, isPrerelease) {
+  // 1. Delete last prerelease, if it exists
 
   // Production:
-  // 1. Delete last prerelease, if it exists
   // 2. Delete last release draft, if it exists
   // 3. Create new release (draft, if draftOnly is true)
 
@@ -1858,12 +1853,14 @@ function processPrivateCommand (botId, bot, msg, command, commandArgsRaw) {
     case '/build_universal':
 
     case '/checkout':
+    case '/bump':
 
     case '/upgrade_tdlib':
     case '/update_sdk': {
       const simpleCommands = [
         '/upgrade_tdlib',
-        '/update_sdk'
+        '/update_sdk',
+        '/bump'
       ];
       const isSimpleCommand = simpleCommands.includes(command);
       if (cur.build_no === -1 || cur.uploaded_version === -1) {
@@ -1918,7 +1915,7 @@ function processPrivateCommand (botId, bot, msg, command, commandArgsRaw) {
         }, {});
 
         const isPRBuild = command === '/deploy_pr';
-        const isPrivate = !(['/deploy_beta'/*, '/deploy_stable'*/, '/deploy_pr'].includes(command));
+        const isPrivate = !(['/deploy_beta', '/deploy_pr'].includes(command));
         const skipBuild = isSimpleCommand;
         const outputChatId = isPRBuild ? PR_CHAT_ID : isPrivate ? (buildType === 'alpha' ? ALPHA_CHAT_ID : ADMIN_USER_ID) : BETA_CHAT_ID;
         const buildId = nextBuildId();
@@ -1946,11 +1943,30 @@ function processPrivateCommand (botId, bot, msg, command, commandArgsRaw) {
           version: _version,
           git: _gitData,
           serviceChatId: msg.chat.id,
-          googlePlayTrack: buildType === 'stable' ? 'production' : ['beta', 'alpha'].includes(buildType) ? buildType : null,
-          huaweiTrack: (buildType === 'stable' && settings.huawei.enabled) || command === '/deploy_huawei' ? 'production' : (buildType === 'beta' && settings.huawei.enabled) ? buildType : null,
-          githubTrack: (buildType === 'stable' && settings.github.enabled) || command === '/deploy_github' ? 'production' : (buildType === 'beta' && settings.github.enabled) ? buildType : null,
+          googlePlayTrack: null,
+          huaweiTrack: null,
+          githubTrack: null,
           files: {}
         };
+        // Google Play
+        if (buildType === 'stable') {
+          build.googlePlayTrack = 'production';
+        } else if (['beta', 'alpha'].includes(buildType)) {
+          build.googlePlayTrack = buildType;
+        }
+        // Huawei AppGallery, Github Releases
+        ['huawei', 'github'].forEach((distributionPlatform) => {
+          const supportedTracks = settings[distributionPlatform] ? settings[distributionPlatform].tracks : null;
+          let track = null;
+          if (command === '/deploy_' + distributionPlatform) {
+            track = 'production';
+          } else if (Array.isArray(supportedTracks) && supportedTracks.includes(buildType)) {
+            track = buildType === 'stable' ? 'production' : buildType;
+          }
+          if (track) {
+            build[distributionPlatform + 'Track'] = track;
+          }
+        });
         if (pullRequestsMetadata && pullRequestsMetadata.length) {
           build.pullRequestsMetadata = pullRequestsMetadata;
           build.pullRequests = {};
@@ -2409,8 +2425,6 @@ function processPrivateCommand (botId, bot, msg, command, commandArgsRaw) {
           }
 
           if (!LOCAL && (build.googlePlayTrack || build.huaweiTrack || build.githubTrack)) {
-            const draftOnly = build.googlePlayTrack === 'production';
-            
             build.tasks.push({
               name: 'prepareForPublishing',
               needsAwait: true,
@@ -2420,6 +2434,7 @@ function processPrivateCommand (botId, bot, msg, command, commandArgsRaw) {
             });
 
             if (build.googlePlayTrack) {
+              const draftOnly = build.googlePlayTrack === 'production';
               const uploadTaskSuffix = ucfirst(build.googlePlayTrack) + (draftOnly ? 'Draft' : ''); 
               build.tasks.push({
                 name: 'publishGooglePlay' + uploadTaskSuffix,
@@ -2431,29 +2446,31 @@ function processPrivateCommand (botId, bot, msg, command, commandArgsRaw) {
             }
 
             if (build.huaweiTrack) {
+              const draftOnly = build.huaweiTrack === 'production';
               const uploadTaskSuffix = (build.huaweiTrack !== 'production' ? ucfirst(build.huaweiTrack) : '') + (draftOnly ? 'Draft' : '');
               build.tasks.push({
                 name: 'publishHuaweiAppGallery' + uploadTaskSuffix,
                 isAsync: true,
                 act: (task, callback) => {
-                  return uploadToHuaweiAppGallery(task, build, callback, true);
+                  return uploadToHuaweiAppGallery(task, build, callback, draftOnly);
                 }
               })
             }
 
             if (build.githubTrack) {
-              const uploadTaskSuffix = (build.githubTrack !== 'production' ? ucfirst(build.githubTrack) : '') + (draftOnly ? 'Draft' : '');
+              const isPrerelease = build.githubTrack !== 'production';
+              const uploadTaskSuffix = isPrerelease ? ucfirst(build.githubTrack) : '';
               build.tasks.push({
                 name: 'publishGithub' + uploadTaskSuffix,
-                isAsync: true,
                 act: (task, callback) => {
-                  return uploadToGithub(task, build, callback, draftOnly);
+                  return uploadToGithub(task, build, callback, isPrerelease);
                 }
               });
             }
           }
         }
 
+        // Simple commands
         switch (command) {
           case '/update_sdk': {
             build.tasks.push({
@@ -2467,6 +2484,19 @@ function processPrivateCommand (botId, bot, msg, command, commandArgsRaw) {
               name: 'upgradeTdlib',
               script: 'tdlib/upgrade.sh',
               args: [
+                settings.github.username,
+                settings.github.access_token
+              ]
+            });
+            break;
+          }
+          case '/bump': {
+            build.tasks.push({
+              name: 'bumpVersion',
+              script: 'scripts/version_bump.sh',
+              args: [
+                'version.app',
+                'version.properties',
                 settings.github.username,
                 settings.github.access_token
               ]

@@ -33,10 +33,10 @@
     "api_key": "YouTube api key"
   },
   "huawei": {
-    "enabled": false,
     "app_id": "<AppGallery App ID>",
     "client_id": "<AppGallery Connect API client_id>",
-    "key": "<AppGallery Connect API secret>"
+    "key": "<AppGallery Connect API secret>",
+    "tracks": [ "<stable|beta|alpha>" ]
   },
   "url": {
     "testing": "https://play.google.com/apps/testing/org.thunderdog.challegram",
@@ -52,8 +52,8 @@
     }
   },
   "github": {
-    "enabled": false,
     "username": "GitHub bot username",
-    "access_token": "GitHub bot access_token"
+    "access_token": "GitHub bot access_token",
+    "tracks": [ "<stable|beta|alpha>" ]
   }
 }
