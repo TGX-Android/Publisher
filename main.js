@@ -2057,6 +2057,26 @@ function processPrivateCommand (botId, bot, msg, command, commandArgsRaw) {
             '--skip-sdk-setup'
           ]
         };
+        const resetTask = {
+          name: 'reset',
+          silence: true,
+          script: 'scripts/force-clean.sh'
+        };
+        const currentBranch = commandArgs.branch || 'main';
+        const checkoutTask = {
+          name: 'checkout' + (currentBranch !== 'main' ? 'Branch' : ''),
+          description: 'checkout',
+          cmd: '(git reset -q --hard || true) && \
+               (git checkout -q -- . || true) && \
+               (git fetch origin -q || true) && \
+               git checkout -q ' + currentBranch + ' && \
+               git reset --hard -q origin/' + currentBranch + ' && \
+               git submodule deinit -q -f --all && \
+               git submodule update -q --init --recursive && \
+               git submodule foreach -q --recursive git reset -q --hard && \
+               git submodule foreach -q --recursive git checkout -q -- . && \
+               echo "Using commit $(git rev-parse --short HEAD) ($(git rev-parse --abbrev-ref HEAD)): $(git show -s --format=%s)"'
+        };
         const newFetchGithubDetailsTask = (pullRequestId) => {
           return {
             name: 'fetchGithubDetails',
@@ -2194,26 +2214,6 @@ function processPrivateCommand (botId, bot, msg, command, commandArgsRaw) {
             }
           }
 
-          const resetTask = {
-            name: 'reset',
-            silence: true,
-            script: 'scripts/force-clean.sh'
-          };
-          const currentBranch = commandArgs.branch || 'main';
-          const checkoutTask = {
-            name: 'checkout' + (currentBranch !== 'main' ? 'Branch' : ''),
-            description: 'checkout',
-            cmd: '(git reset -q --hard || true) && \
-                 (git checkout -q -- . || true) && \
-                 (git fetch origin -q || true) && \
-                 git checkout -q ' + currentBranch + ' && \
-                 git reset --hard -q origin/' + currentBranch + ' && \
-                 git submodule deinit -q -f --all && \
-                 git submodule update -q --init --recursive && \
-                 git submodule foreach -q --recursive git reset -q --hard && \
-                 git submodule foreach -q --recursive git checkout -q -- . && \
-                 echo "Using commit $(git rev-parse --short HEAD) ($(git rev-parse --abbrev-ref HEAD)): $(git show -s --format=%s)"'
-          };
           build.tasks.push(resetTask);
           build.tasks.push(checkoutTask);
           if (build.pullRequestsMetadata) {
@@ -2491,6 +2491,8 @@ function processPrivateCommand (botId, bot, msg, command, commandArgsRaw) {
             break;
           }
           case '/bump': {
+            build.tasks.push(resetTask);
+            build.tasks.push(checkoutTask);
             build.tasks.push({
               name: 'bumpVersion',
               script: 'scripts/version_bump.sh',
