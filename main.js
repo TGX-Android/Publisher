@@ -2495,13 +2495,7 @@ function processPrivateCommand (botId, bot, msg, command, commandArgsRaw) {
             build.tasks.push(checkoutTask);
             build.tasks.push({
               name: 'bumpVersion',
-              script: 'scripts/version_bump.sh',
-              args: [
-                'version.app',
-                'version.properties',
-                settings.github.username,
-                settings.github.access_token
-              ]
+              script: 'scripts/version_bump.sh'
             });
             break;
           }
