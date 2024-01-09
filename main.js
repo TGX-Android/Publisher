@@ -1911,7 +1911,8 @@ function uploadToGithub (task, build, onDone, commandArgsRaw, isPrerelease, tagN
       console.log('Created GitHub release, uploading asset...');
 
       const apkFileName = settings.app.name.replace(/ /gi, '-') + '-' + build.version.name + (isPrerelease ? '-' + build.githubTrack : '') + '.apk';
-      const uploadResult = await uploadGitHubAsset(release, build.files.universal.apkFile.path, apkFileName, 'APK');
+      const apkLabel = settings.app.name + ' ' + build.version.name + (isPrerelease ? ' ' + build.githubTrack : '');
+      const uploadResult = await uploadGitHubAsset(release, build.files.universal.apkFile.path, apkFileName, apkLabel);
       if (!uploadResult) {
         console.error('Upload GitHub asset failed, deleting release...');
         await deleteGitHubRelease(owner, repository, release.id);
