@@ -2772,9 +2772,10 @@ function processPrivateCommand (botId, bot, msg, command, commandArgsRaw) {
             }
 
             if (build.githubTrack) {
-              // Force draft, if we are preparing Google Play stable
-              const draftOnly = build.googlePlayTrack === 'production';
-              const isPrerelease = build.githubTrack !== 'production';
+              // Mark all builds as pre-release, unless they are uploaded to GitHub stable
+              const isPrerelease = build.googlePlayTrack !== 'production';
+              // Force draft, if it a production update
+              const draftOnly = !isPrerelease;
 
               const tagName = 'v' + build.version.name + (isPrerelease ? '-' + build.githubTrack : '');
               const createTagTask = {
