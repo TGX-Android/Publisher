@@ -27,7 +27,8 @@ const fs = require('fs'),
       http = require('http'),
       iconv = require('iconv-lite'),
       AdmZip = require('adm-zip'),
-      FormData = require('form-data');
+      FormData = require('form-data'),
+      UriTemplate = require('uri-template');
 const { spawn, exec, execSync } = require('child_process');
 const { google } = require('googleapis');
 const { Level } = require('level');
@@ -429,6 +430,35 @@ function fetchHttp (url, needBinary, httpOptions) {
       console.error('Cannot fetch', url, e);
       reject(e);
     }
+  });
+}
+
+function uploadHttpFile (url, filePath, httpHeaders, httpOptions, needBinary) {
+  return new Promise((accept, reject) => {
+    const parsed = new URL(url);
+    const protocol = (parsed.protocol === 'https:' ? https : http);
+
+    const file = fs.createReadStream(filePath);
+    const stat = fs.statSync(filePath);
+
+    const options = Object.assign({
+      host: parsed.host,
+      path: parsed.pathname + parsed.search,
+      method: 'POST',
+      headers: Object.assign({
+        'Content-Type': 'application/octet-stream',
+        'Content-Length': stat.size
+      }, httpHeaders || {})
+    }, httpOptions || {});
+
+    const req = protocol.request(options, (res) => {
+      toUtf8(res, (contentType, content) => {
+        accept({statusCode: res.statusCode, statusMessage: res.statusMessage, content, contentType});
+      }, needBinary);
+    });
+
+    req.on('error', reject);
+    file.pipe(req);
   });
 }
 
@@ -1640,17 +1670,275 @@ function uploadToHuaweiAppGallery (task, build, onDone, draftOnly) {
   };
 }
 
-function uploadToGithub (task, build, onDone, isPrerelease) {
-  // 1. Delete last prerelease, if it exists
+async function createGitHubRelease (owner, repository, tagName, releaseName, releaseNotes, isDraft, isPrerelease) {
+  isDraft = !!isDraft;
+  isPrerelease = !!isPrerelease;
+  
+  const data = {
+    tag_name: tagName,
+    // unused target_commitish: build.commit.long,
+    name: releaseName,
+    body: releaseNotes,
+    draft: isDraft,
+    prerelease: isPrerelease
+  };
+  const apiUrl = 'https://api.github.com/repos/' + owner + '/' + repository + '/releases';
+  try {
+    const response = await postHttp(apiUrl, data, false, {
+      headers: {
+        'Accept': 'application/vnd.github+json',
+        'Authorization': 'Bearer ' + settings.github.access_token,
+        'X-GitHub-Api-Version': '2022-11-28',
+        'User-Agent': 'Telegram-X-Publisher'
+      }
+    });
+    if (response.statusCode < 200 || response.statusCode >= 300) {
+      console.error('Create GitHub release failed', response.statusCode, response.statusMessage, response.contentType, response.content);
+      return null;
+    }
+    return JSON.parse(response.content);
+  } catch (e) {
+    console.error('Failed to create GitHub release', e);
+    return null;
+  }
+}
 
-  // Production:
-  // 2. Delete last release draft, if it exists
-  // 3. Create new release (draft, if draftOnly is true)
+async function updateGitHubRelease (owner, repository, releaseId, isDraft, isPrerelease) {
+  const data = {};
+  if (isDraft !== undefined) {
+    data.draft = isDraft;
+  }
+  if (isPrerelease !== undefined) {
+    data.prerelease = isPrerelease;
+  }
 
-  // The APKs to be included: universal, huawei, foss.
-  // For smaller, architecture-specific builds, force refer to @tgx_log
+  const apiUrl = 'https://api.github.com/repos/' + owner + '/' + repository + '/releases/' + releaseId;
+  try {
+    const response = await postHttp(apiUrl, data, false, {
+      headers: {
+        'Accept': 'application/vnd.github+json',
+        'Authorization': 'Bearer ' + settings.github.access_token,
+        'X-GitHub-Api-Version': '2022-11-28',
+        'User-Agent': 'Telegram-X-Publisher'
+      }
+    });
+    if (response.statusCode < 200 || response.statusCode >= 300) {
+      console.error('Create GitHub release failed', response.statusCode, response.statusMessage, response.contentType, response.content);
+      return null;
+    }
+    return JSON.parse(response.content);
+  } catch (e) {
+    console.error('Failed to create GitHub release', e);
+    return null;
+  }
+}
 
-  onDone(0);
+async function deleteGitHubRelease (owner, repository, releaseId) {
+  const apiUrl = 'https://api.github.com/repos/' + owner + '/' + repository + '/releases/' + releaseId;
+  try {
+    const response = await fetchHttp(apiUrl, false, {
+      headers: {
+        'Accept': 'application/vnd.github+json',
+        'Authorization': 'Bearer ' + settings.github.access_token,
+        'X-GitHub-Api-Version': '2022-11-28',
+        'User-Agent': 'Telegram-X-Publisher'
+      },
+      method: 'DELETE'
+    });
+    if (response.statusCode < 200 || response.statusCode >= 300) {
+      console.error('Delete GitHub release failed', response.statusCode, response.statusMessage, response.contentType, response.content);
+      return false;
+    }
+    return true;
+  } catch (e) {
+    console.error('Failed to delete GitHub release', e);
+    return false;
+  }
+}
+
+async function deletePastGitHubPrereleases (owner, repository, newReleaseId) {
+  const githubId = owner + '/' + repository;
+  let pastReleases = await getObject('github', githubId);
+  if (pastReleases && pastReleases.ids) {
+    while (pastReleases.ids.length) {
+      const releaseIdToDelete = pastReleases.ids.pop();
+      console.log('Deleting past GitHub pre-release...', releaseIdToDelete);
+      const isDeleted = await deleteGitHubRelease(owner, repository, releaseIdToDelete);
+      if (!isDeleted) {
+        return false;
+      }
+      await storeObject('github', pastReleases, githubId);
+    }
+  }
+  if (newReleaseId) {
+    pastReleases = {
+      ids: [newReleaseId]
+    };
+    await storeObject('github', pastReleases, githubId);
+  }
+  return true;
+}
+
+async function uploadGitHubAsset (release, sourceFilePath, fileName, label) {
+  try {
+    const uploadUrlTemplate = UriTemplate.parse(release.upload_url);
+    const uploadUrl = uploadUrlTemplate.expand({
+      name: fileName,
+      label
+    });
+
+    const response = await uploadHttpFile(uploadUrl, sourceFilePath, {
+      'Accept': 'application/vnd.github+json',
+      'Authorization': 'Bearer ' + settings.github.access_token,
+      'X-GitHub-Api-Version': '2022-11-28',
+      'User-Agent': 'Telegram-X-Publisher'
+    });
+    if (response.statusCode < 200 || response.statusCode >= 300) {
+      console.error('Upload GitHub asset failed', response.statusCode, response.statusMessage, response.contentType, response.content);
+      return null;
+    }
+
+    return JSON.parse(response.content);
+  } catch (e) {
+    console.error('Failed to upload GitHub asset', e);
+    return null;
+  }
+}
+
+function uploadToGithub (task, build, onDone, commandArgsRaw, isPrerelease, tagName, draftOnly) {
+  const versionName = settings.app.name + ' ' +
+    build.version.name +
+    (isPrerelease ? ' ' + build.githubTrack : '');
+
+  let changeLog = '**' + settings.app.name + '** `' + versionName + '` has been released.';
+  const fromToCommit = getFromToCommit(build, true);
+  if (fromToCommit) {
+    const changesUrl = build.git.remoteUrl + '/compare/' + fromToCommit.commit_range;
+    changeLog += ' You can review all changes in the source code [here](' + changesUrl + ').'
+  }
+  changeLog += '\n\n';
+
+  if (build.pullRequestsMetadata || !empty(build.pullRequests)) {
+    changeLog += '### Pull requests\n\n';
+    changeLog += 'This version includes the following unmerged pull requests. Review the source code changes separately:';
+    changeLog += '\n\n';
+
+    changeLog += toDisplayPullRequestList(build, true);
+    changeLog += '\n\n';
+  }
+
+  if (commandArgsRaw) {
+    changeLog += '## Changes\n';
+    changeLog += commandArgsRaw.trim() + '\n\n';
+  }
+
+  changeLog += '## Download\n';
+  ['googlePlay', 'huawei', 'github', 'telegram'].forEach((platform) => {
+    const track = build[platform + 'Track'];
+    if (track || platform === 'telegram') {
+      changeLog += '\n* ';
+      switch (platform) {
+        case 'googlePlay': {
+          changeLog += '**[Google Play](' + settings.app.market_url.google + ')**';
+          changeLog += ' ([subscribe to beta](' + settings.url.testing + '))';
+          break;
+        }
+        case 'huawei': {
+          changeLog += '**[Huawei AppGallery](' + settings.app.market_url.huawei + ')**';
+          break;
+        }
+        case 'github': {
+          changeLog += '**[GitHub Releases](' + build.git.remoteUrl + '/releases)**';
+          break;
+        }
+        case 'telegram': {
+          changeLog += '**[Telegram X APKs & Build Info](https://t.me/tgx_log)**';
+          break;
+        }
+      }
+    }
+  });
+  changeLog += '\n\n';
+
+  changeLog += '## Checksums\n\n';
+  changeLog += 'You can always check if checksum of an APK you downloaded corresponds to any official Telegram X build via [@tgx_bot](https://t.me/tgx_bot).\n\n';
+
+  changeLog += '<details><summary>Checksums for <code>' + versionName + '</code>. Tap to expand</summary>';
+
+  const allVariants = ['universal', 'arm64', 'arm32', 'x64', 'x86'];
+  const builtVariants = Object.keys(build.files).sort((a, b) => {
+    const aIndex = allVariants.indexOf(a);
+    const bIndex = allVariants.indexOf(b);
+    const aKnown = aIndex !== -1;
+    const bKnown = bIndex !== -1;
+    if (aKnown != bKnown) {
+      return aKnown ? -1 : 1;
+    }
+    if (aIndex != bIndex) {
+      return aIndex < bIndex ? -1 : 1;
+    }
+    return 0;
+  });
+  builtVariants.forEach((variant) => {
+    const files = build.files[variant];
+    changeLog += '\n\n---';
+    changeLog += '\n\n#### ' + getDisplayVariant(variant) + '\n';
+    ['sha256', 'sha1', 'md5'].forEach((algorithm) => {
+      const hash = files.apkFile.checksum[algorithm];
+      if (hash) {
+        changeLog += '\n**' + toDisplayAlgorithm(algorithm) + '**: ';
+        changeLog += '[' + hash + '](https://t.me/tgx_bot?start=' + hash + ')';
+      }
+    });
+  });
+
+  changeLog += '\n\n</details>';
+
+  (async () => {
+    try {
+      const githubData = build.git.remoteUrl.replace(/^https?:\/\/github\.com\//gi, '').split('/');
+      const owner = githubData[0];
+      const repository = githubData[1];
+
+      console.log('Creating GitHub release...', 'owner:', owner, 'repository:', repository, 'remote:', build.git.remoteUrl);
+
+      const release = await createGitHubRelease(owner, repository, tagName, versionName, changeLog, true, isPrerelease);
+      if (!release) {
+        onDone(1);
+        return;
+      }
+
+      console.log('Created GitHub release, uploading asset...');
+
+      const apkFileName = settings.app.name.replace(/ /gi, '-') + '-' + build.version.name + (isPrerelease ? '-' + build.githubTrack : '') + '.apk';
+      const uploadResult = await uploadGitHubAsset(release, build.files.universal.apkFile.path, apkFileName, 'APK');
+      if (!uploadResult) {
+        console.error('Upload GitHub asset failed, deleting release...');
+        await deleteGitHubRelease(owner, repository, release.id);
+
+        onDone(1);
+        return;
+      }
+
+      if (!draftOnly) {
+        console.log('Uploaded GitHub asset, updating release...');
+        const updatedRelease = await updateGitHubRelease(owner, repository, release.id, false);
+        if (!updatedRelease) {
+          onDone(1);
+          return;
+        }
+      }
+
+      console.log('Cleaning up previous GitHub pre-releases...');
+      await deletePastGitHubPrereleases(owner, repository, isPrerelease ? release.id : undefined);
+
+      console.log('GitHub published successfully!');
+      onDone(0);
+    } catch (e) {
+      console.error('GitHub publishing failed', e);
+      onDone(1);
+    }
+  })();
 
   return async () => {
     if (!task.endTime) {
@@ -1707,41 +1995,67 @@ function toDisplayDate (seconds) {
   });
 }
 
-function toDisplayPullRequestList (build) {
+function toDisplayPullRequestList (build, isGitHubRelease) {
   const remoteUrl = build.remoteUrl || (build.git ? build.git.remoteUrl : '');
   const toItem = (pullRequestId, pullRequestCommit, pullRequest, nextPullRequest) => {
     const pullRequestUrl = remoteUrl + '/pull/' + pullRequestId;
-    let text = '<a href="' + pullRequestUrl + '"><b>' + pullRequestId + '</b></a>';
+    let text = null;
+    if (isGitHubRelease) {
+      text = '**#' + pullRequestId + '**';
+    } else {
+      text = '<a href="' + pullRequestUrl + '"><b>' + pullRequestId + '</b></a>';
+    }
     if (pullRequest) {
-      text += ' / <a href="' + pullRequestUrl + '/files/' + pullRequest.commit.long + '">' + pullRequest.commit.short + '</a>';
+      const pullRequestSourceUrl = pullRequestUrl + '/files/' + pullRequest.commit.long;
+      text += ' / ';
+      if (isGitHubRelease) {
+        text += '[' + pullRequest.commit.short + '](' + pullRequestSourceUrl + ')';
+      } else {
+        text += '<a href="' + pullRequestSourceUrl + '">' + pullRequest.commit.short + '</a>';
+      }
       if (pullRequest.github) {
         if (Math.max(pullRequest.github.additions || pullRequest.github.deletions) > 0) {
-          text += ' (<code>' + [pullRequest.github.additions, -pullRequest.github.deletions].filter((item) => item !== 0).map((item) => item > 0 ? '+' + item : item.toString()) + '</code>)'
+          text += ' (';
+          text += isGitHubRelease ? '`' : '<code>';
+          text += [pullRequest.github.additions, -pullRequest.github.deletions].filter((item) => item !== 0).map((item) => item > 0 ? '+' + item : item.toString());
+          text += isGitHubRelease ? '`' : '</code>)'
         }
         if (!nextPullRequest || !nextPullRequest.github || nextPullRequest.github.name !== pullRequest.github.name) {
-          text += ' by <a href="' + (pullRequest.github.url || 'https://github.com/' + pullRequest.github.name) + '">' + pullRequest.github.name + '</a>';
+          if (isGitHubRelease) {
+            text += ' by @' + pullRequest.github.name;
+          } else {
+            text += ' by <a href="' + (pullRequest.github.url || 'https://github.com/' + pullRequest.github.name) + '">' + pullRequest.github.name + '</a>';
+          }
         }
       }
     } else if (pullRequestCommit) {
-      text += ' / <a href="' + pullRequestUrl + '/files/' + pullRequestCommit + '">' + pullRequestCommit + '</a>';
+      const pullRequestSourceUrl = pullRequestUrl + '/files/' + pullRequestCommit;
+      text += ' / ';
+      if (isGitHubRelease) {
+        text += '[' + pullRequestCommit + '](' + pullRequestSourceUrl + ')';
+      } else {
+        text += '<a href="' + pullRequestSourceUrl + '">' + pullRequestCommit + '</a>';
+      }
     }
     return text;
   };
+  const separator = isGitHubRelease ? '\n' : ', ';
+  const prefix = isGitHubRelease ? '* ' : '';
   if (build.pullRequestsMetadata) {
     return build.pullRequestsMetadata.map((pullRequestMetadata, index) => {
       const pullRequestId = pullRequestMetadata.id;
       const pullRequest = build.pullRequests ? build.pullRequests[pullRequestId] : null;
       const nextPullRequestId = index + 1 < build.pullRequestsMetadata.length ? build.pullRequestsMetadata[index + 1].id : null;
       const nextPullRequest = nextPullRequestId !== null ? build.pullRequests[nextPullRequestId] : null;
-      return toItem(pullRequestId, pullRequestMetadata.commit, pullRequest, nextPullRequest);
-    }).join(', ');
+      return prefix + toItem(pullRequestId, pullRequestMetadata.commit, pullRequest, nextPullRequest);
+    }).join(separator);
   } else if (build.pullRequests) {
     const pullRequestIds = Object.keys(build.pullRequests);
     return pullRequestIds.map((pullRequestId, index) => {
       const pullRequest = build.pullRequests[pullRequestId];
       const nextPullRequest = index + 1 < pullRequestIds.length ? build.pullRequests[pullRequestIds[index + 1]] : null;
-      return toItem(parseInt(pullRequestId), null, pullRequest, nextPullRequest);
-    }).join(', ');
+      return prefix + toItem(parseInt(pullRequestId), null, pullRequest, nextPullRequest);
+    }).join(separator);
   } else {
     return '';
   }
@@ -2458,12 +2772,24 @@ function processPrivateCommand (botId, bot, msg, command, commandArgsRaw) {
             }
 
             if (build.githubTrack) {
+              // Force draft, if we are preparing Google Play stable
+              const draftOnly = build.googlePlayTrack === 'production';
               const isPrerelease = build.githubTrack !== 'production';
+
+              const tagName = 'v' + build.version.name + (isPrerelease ? '-' + build.githubTrack : '');
+              const createTagTask = {
+                name: 'createTag',
+                description: 'createTag',
+                cmd: 'git tag -f ' + tagName + ' ' + build.git.commit.long + ' && \
+                      git push origin --tags -f'
+              };
+              build.tasks.push(createTagTask);
+
               const uploadTaskSuffix = isPrerelease ? ucfirst(build.githubTrack) : '';
               build.tasks.push({
                 name: 'publishGithub' + uploadTaskSuffix,
                 act: (task, callback) => {
-                  return uploadToGithub(task, build, callback, isPrerelease);
+                  return uploadToGithub(task, build, callback, commandArgsRaw, isPrerelease, tagName, draftOnly);
                 }
               });
             }
@@ -2565,9 +2891,9 @@ function processPrivateCommand (botId, bot, msg, command, commandArgsRaw) {
           result += '\n\n';
           if (build.endTime && !build.error && isPublic && !build.aborted) {
             if (build.googlePlayTrack === 'alpha' || build.googlePlayTrack === 'beta') {
-              result += 'Google Play <b>' + (build.googlePlayTrack === 'beta' ? '<a href="' + TESTING_URL + '">' : '') + build.googlePlayTrack + (build.googlePlayTrack === 'beta' ? '</a>' : '') + '</b> will be available within an hour.\n';
+              result += 'Google Play <b>' + (build.googlePlayTrack === 'beta' ? '<a href="' + TESTING_URL + '">' : '') + build.googlePlayTrack + (build.googlePlayTrack === 'beta' ? '</a>' : '') + '</b> will be available after passing the review process.\n';
             } else if (build.googlePlayTrack === 'production') {
-              result += 'An update will become available for all users gradually once Google Play review will be finished.\n';
+              result += 'An update will be available for all users after passing the review process.\n';
             }
             const variantLinks = [];
             if (build.publicMessages) {
