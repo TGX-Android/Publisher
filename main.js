@@ -2734,7 +2734,7 @@ function processPrivateCommand (botId, bot, msg, command, commandArgsRaw) {
               name: 'publishTelegram' + id + (build.googlePlayTrack === 'production' ? 'Draft' : ''),
               needsAwait: true,
               act: (task, callback) => {
-                return publishToTelegram(bot, task, build, callback, targetChatId, false, true, isPRBuild);
+                return publishToTelegram(bot, task, build, callback, targetChatId, false, true, true);
               }
             });
           }
