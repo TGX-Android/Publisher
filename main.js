@@ -2782,7 +2782,8 @@ function processPrivateCommand (botId, bot, msg, command, commandArgsRaw) {
               const createTagTask = {
                 name: 'createTag',
                 description: 'createTag',
-                cmd: 'git tag -f ' + tagName + ' ' + build.git.commit.long + ' && \
+                cmd: 'git fetch && \
+                      git tag -f ' + tagName + ' ' + build.git.commit.long + ' && \
                       git push origin --tags -f'
               };
               build.tasks.push(createTagTask);
@@ -2794,6 +2795,13 @@ function processPrivateCommand (botId, bot, msg, command, commandArgsRaw) {
                   return uploadToGithub(task, build, callback, commandArgsRaw, isPrerelease, tagName, draftOnly);
                 }
               });
+
+              const cleanupTagsTask = {
+                name: 'cleanupTags',
+                description: 'cleanupTags',
+                cmd: '(git tag | grep "beta" | grep -v ' + tagName + ' | xargs -I% git tag -d %) && (git push origin --tags -f)'
+              };
+              build.tasks.push(cleanupTagsTask);
             }
           }
         }
