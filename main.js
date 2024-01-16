@@ -2799,7 +2799,7 @@ function processPrivateCommand (botId, bot, msg, command, commandArgsRaw) {
               const cleanupTagsTask = {
                 name: 'cleanupTags',
                 description: 'cleanupTags',
-                cmd: '(git tag | grep "beta" | grep -v ' + tagName + ' | xargs -I% git tag -d %) && (git push origin --tags -f)'
+                cmd: '(git tag | grep "beta" | grep -v ' + tagName + ' | xargs -I% sh -c \'git tag -d % && git push origin :refs/tags/% && echo "Deleted tag %"\') && (git push origin --tags -f)'
               };
               build.tasks.push(cleanupTagsTask);
             }
