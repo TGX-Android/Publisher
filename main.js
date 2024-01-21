@@ -2019,7 +2019,8 @@ function toDisplayPullRequestList (build, isGitHubRelease) {
           text += ' (';
           text += isGitHubRelease ? '`' : '<code>';
           text += [pullRequest.github.additions, -pullRequest.github.deletions].filter((item) => item !== 0).map((item) => item > 0 ? '+' + item : item.toString());
-          text += isGitHubRelease ? '`' : '</code>)'
+          text += isGitHubRelease ? '`' : '</code>'
+          text += ')';
         }
         if (!nextPullRequest || !nextPullRequest.github || nextPullRequest.github.name !== pullRequest.github.name) {
           if (isGitHubRelease) {
