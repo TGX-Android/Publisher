@@ -2861,7 +2861,7 @@ function processPrivateCommand (botId, bot, msg, command, commandArgsRaw) {
                 result += ' is canceling…';
               }
             } else if (build.endTime) {
-              result += build.error ? ' <b>deploy failed</b>.' :
+              result += build.error ? ' <b>deploy incomplete</b>.' :
                 build.googlePlayTrack ? ' <a href="' + MARKET_URL + '"><b>' + (build.googlePlayTrack === 'production' ? 'sent to review' : 'released') + '</b></a>.' :
                 ' <b>released</b>.';
             } else {
@@ -2916,14 +2916,14 @@ function processPrivateCommand (botId, bot, msg, command, commandArgsRaw) {
               }
             }
             if (variantLinks.length) {
-              result += 'You can install <b>APKs</b> directly: ' + variantLinks.join(', ') + '.';
+              result += 'You can install <b>APKs</b> without waiting: ' + variantLinks.join(', ') + '.';
             } else if (build.googlePlayTrack === 'production') {
               result += '<b>APKs</b> will be published separately.';
             } else {
               result += 'You can find <b>APKs</b> below.';
             }
           } else if (build.endTime && (build.error || build.aborted) && isPublic) {
-            result += 'Another attempt might be made soon.';
+            result += 'Another build might be made soon.';
           } else {
             for (let i = 0; i < build.tasks.length; i++) {
               let task = build.tasks[i];
