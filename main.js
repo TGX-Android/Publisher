@@ -1232,11 +1232,17 @@ function prepareForPublishing (task, build, onDone) {
 
     const changeLogVersionName = build.version.name;
     let changeLogText = changeLogVersionName + '\n\n' + 'https://t.me/tgx_android';
-    const fromToCommit = getFromToCommit(build, true);
+    const productionFromToCommit = getFromToCommit(build, true);
     const viewSourceUrl = build.git.remoteUrl + '/tree/' + build.git.commit.long;
-    if (fromToCommit) {
-      const diffUrl = build.git.remoteUrl + '/compare/' + fromToCommit.commit_range;
-      changeLogText += '\n\nChanges from ' + fromToCommit.from_version.name + ':\n';
+    if (productionFromToCommit) {
+      const betaFromToCommit = getFromToCommit(build);
+      if (betaFromToCommit && betaFromToCommit.commit_range !== productionFromToCommit.commit_range) {
+        const betaDiffUrl = build.git.remoteUrl + '/compare/' + betaFromToCommit.commit_range;
+        changeLogText += '\n\nChanges from ' + betaFromToCommit.from_version.name + ':\n';
+        changeLogText += betaDiffUrl;
+      }
+      const diffUrl = build.git.remoteUrl + '/compare/' + productionFromToCommit.commit_range;
+      changeLogText += '\n\nChanges from ' + productionFromToCommit.from_version.name + ':\n';
       changeLogText += diffUrl;
       build.fallbackReleaseNotes = diffUrl;
     } else {
