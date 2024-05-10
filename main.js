@@ -1245,6 +1245,24 @@ function prepareForPublishing (task, build, onDone) {
       changeLogText += '\n\nChanges from ' + productionFromToCommit.from_version.name + ':\n';
       changeLogText += diffUrl;
       build.fallbackReleaseNotes = diffUrl;
+      if (build.pullRequestsMetadata || !empty(build.pullRequests)) {
+        changeLog += '\n\nThis version also includes these pull requests:';
+        if (build.pullRequestsMetadata) {
+          build.pullRequestsMetadata.forEach((pullRequestMetadata) => {
+            const pullRequestId = pullRequestMetadata.id;
+            const pullRequest = build.pullRequests ? build.pullRequests[pullRequestId] : null;
+            changeLog += '\n';
+            changeLog += build.git.remoteUrl + '/pull/' + pullRequestId + ' at ' + pullRequest.commit.short;
+          });
+        } else if (!empty(build.pullRequests)) {
+          const pullRequestIds = Object.keys(build.pullRequests);
+          pullRequestIds.forEach((pullRequestId) => {
+            const pullRequest = build.pullRequests[pullRequestId];
+            changeLog += '\n';
+            changeLog += build.git.remoteUrl + '/pull/' + pullRequestId + ' at ' + pullRequest.commit.short;
+          });
+        }
+      }
     } else {
       build.fallbackReleaseNotes = 'This version is based on this source code: ' + viewSourceUrl;
     }
