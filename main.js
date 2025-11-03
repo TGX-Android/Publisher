@@ -752,7 +752,7 @@ function getBuildFiles (build, variant, callback) {
     }
   };
 
-  const prefix = '^' + escapeRegExp(build.outputApplication.name || 'Telegram X').replace(/ /g, '-').replace(/#/g, '') + '-' + build.version.name.replace(/\./gi, '\\.') + '(?:\\+[0-9,]+)?' + (architecture ? '(?:-' + architecture + ')?' : '') ;
+  const prefix = '^' + escapeRegExp(build.outputApplication.name || 'Telegram X').replace(/ /g, '-').replace(/#/g, '') + '-' + build.version.name.replace(/\./gi, '\\.') + '(?:\\+[0-9,]+)?' + (architecture ? '(?:-' + architecture + ')?' : '') + (build.outputApplication.extension ? '(?:-' + build.outputApplication.extension + ')?' : '') ;
   fs.exists(nativeDebugSymbolsFile, (exists) => {
     result.nativeDebugSymbolsFile = exists ? {path: nativeDebugSymbolsFile} : null;
     check();
@@ -2300,7 +2300,7 @@ function processPrivateCommand (botId, bot, msg, command, commandArgsRaw) {
           let track = null;
           if (command === '/deploy_' + distributionPlatform) {
             track = 'production';
-          } else if (Array.isArray(supportedTracks) && supportedTracks.includes(buildType)) {
+          } else if (track !== 'huawei' && Array.isArray(supportedTracks) && supportedTracks.includes(buildType)) {
             track = buildType === 'stable' ? 'production' : buildType;
           }
           if (track) {
@@ -2454,6 +2454,10 @@ function processPrivateCommand (botId, bot, msg, command, commandArgsRaw) {
         if (command === '/checkout') {
           let appId = commandArgs['app.id'] || settings.app.id;
           let appName = commandArgs['app.name'] || settings.app.name;
+          let extensionName = commandArgs['tgx.extension'] || false;
+          if (extensionName === 'none') {
+            extensionName = false;
+          }
 
           const updateSettingsTask = {
             name: 'updateSettings',
@@ -2532,9 +2536,13 @@ function processPrivateCommand (botId, bot, msg, command, commandArgsRaw) {
                 'app.name=' + appName + '\n' +
                 'app.experimental=' + isExperimental + '\n' +
                 'app.dontobfuscate=' + dontObfuscate + '\n';
+              if (extensionName) {
+                properties += 'tgx.extension=' + extensionName + '\n';
+              }
               build.outputApplication = {
                 id: appId,
                 name: appName,
+                extension: extensionName,
                 experimental: isExperimental,
                 dontObfuscate,
                 isPRBuild
@@ -2633,6 +2641,7 @@ function processPrivateCommand (botId, bot, msg, command, commandArgsRaw) {
                 build.outputApplication = {
                   id: getProperty(data, 'app.id') || settings.app.id,
                   name: getProperty(data, 'app.name') || settings.app.name,
+                  extension: getProperty(data, 'tgx.extension') || false,
                   experimental: getProperty(data, 'app.experimental') === 'true',
                   dontObfuscate: getProperty(data, 'app.dontobfuscate') === 'true',
                   isPRBuild
