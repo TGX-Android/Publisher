@@ -116,6 +116,10 @@ const play = LOCAL ? null : google.androidpublisher({
   }
 });
 
+// CONSTANTS
+
+const ALL_PLATFORMS = ['googlePlay', 'huawei', 'github', 'telegram'];
+
 // MAIN
 
 
@@ -613,21 +617,33 @@ function duration (start, end, full) {
   return result;
 }
 
-async function traceMaxApkVersionCode (type, versionCode, uploadDate) {
-  const cur = await getObject('apk', type);
-  const max = await getObject('apk', 'max');
+async function traceMaxApkVersionCode (type, versionCode, uploadDate, track) {
+  const isDefault = track === 'googlePlay';
+  const id = isDefault ? type : track + '-' + type;
+  const maxId = isDefault ? 'max' : track + '-max';
+  const cur = await getObject('apk', id);
+  const max = await getObject('apk', maxId);
   if (!max || versionCode > max.versionCode) {
-    await storeObject('apk', {versionCode: versionCode, uploadDate: uploadDate}, 'max');
+    await storeObject('apk', {versionCode: versionCode, uploadDate: uploadDate, track}, maxId);
   }
   if (!cur || versionCode > cur.versionCode) {
-    await storeObject('apk', {versionCode: versionCode, uploadDate: uploadDate}, type);
+    await storeObject('apk', {versionCode: versionCode, uploadDate: uploadDate, track}, id);
   }
 }
 
-async function canUploadApk (type, versionCode) {
-  const cur = await getObject('apk', type);
-  const max = type === 'universal' ? await getObject('apk', 'max') : null;
-  return versionCode > Math.max(cur ? cur.versionCode : 0, max ? max.versionCode : 0);
+async function canUploadApk (type, versionCode, tracks) {
+  const isDefault = track === 'googlePlay';
+  const max = type === 'universal' ? await getObject('apk', isDefault ? 'max' : track + '-max') : null;
+  for (let i = 0; i < tracks.length; i++) {
+    const track = tracks[i];
+    const id = isDefault ? type : track + '-' + type;
+    const cur = await getObject('apk', id);
+    const maxVersion = Math.max(cur ? cur.versionCode : 0, type === 'universal' && track === 'googlePlay' && max ? max.versionCode : 0);
+    if (versionCode <= maxVersion) {
+      return false;
+    }
+  }
+  return true;
 }
 
 async function traceDuration (type, name, startTime, endTime, isComplete) {
@@ -1288,7 +1304,7 @@ function prepareForPublishing (task, build, onDone) {
       onDone(1);
       return;
     }
-    canUploadApk(variant, files.metadata.versionCode).then((success) => {
+    canUploadApk(variant, files.metadata.versionCode, build.publishingTracks).then((success) => {
       if (success) {
         onVariantChecked();
       } else {
@@ -1369,7 +1385,7 @@ function uploadToGooglePlay (task, build, onDone) {
         }
       }).then((uploadedApk) => {
         console.log('Successfully uploaded APK', JSON.stringify(uploadedApk));
-        traceMaxApkVersionCode(variant, uploadedApk.data.versionCode, new Date());
+        traceMaxApkVersionCode(variant, uploadedApk.data.versionCode, new Date(), 'googlePlay');
         if (uploadedApk.data.binary.sha256 !== files.apkFile.checksum.sha256) {
           console.error('SHA-256 mismatch!', variant);
           task.logPublicly('SHA-256 mismatch!');
@@ -1609,7 +1625,8 @@ async function submitHuaweiAppUpdate (accessToken) {
 
 function uploadToHuaweiAppGallery (task, build, onDone, draftOnly) {
   (async () => {
-    const targetFiles = build.files['huawei'] || build.files['universal'];
+    const buildType = build.files['huawei'] ? 'huawei' : 'universal';
+    const targetFiles = build.files[buildType];
     // Step 1. Obtain access_token
     const auth = await obtainHuaweiAccessToken();
     if (!auth || !auth.access_token) {
@@ -1681,6 +1698,7 @@ function uploadToHuaweiAppGallery (task, build, onDone, draftOnly) {
       }
     }
 
+    await traceMaxApkVersionCode(buildType, build.version.code, new Date(), 'huawei');
     console.log('Successfully published Huawei AppGallery');
     onDone(0);
   })();
@@ -1857,7 +1875,7 @@ function uploadToGithub (task, build, onDone, commandArgsRaw, isPrerelease, tagN
   }
 
   changeLog += '## Download\n';
-  ['googlePlay', 'huawei', 'github', 'telegram'].forEach((platform) => {
+  ALL_PLATFORMS.forEach((platform) => {
     const track = build[platform + 'Track'];
     if (track || platform === 'telegram') {
       changeLog += '\n* ';
@@ -1953,6 +1971,8 @@ function uploadToGithub (task, build, onDone, commandArgsRaw, isPrerelease, tagN
           return;
         }
       }
+
+      await traceMaxApkVersionCode('universal', build.version.code, new Date(), 'github');
 
       console.log('Cleaning up previous GitHub pre-releases...');
       await deletePastGitHubPrereleases(owner, repository, isPrerelease ? release.id : undefined);
@@ -2774,6 +2794,7 @@ function processPrivateCommand (botId, bot, msg, command, commandArgsRaw) {
           }
 
           if (!LOCAL && (build.googlePlayTrack || build.huaweiTrack || build.githubTrack)) {
+            build.publishingTracks = [build.googlePlayTrack, build.huaweiTrack, build.githubTrack].filter((track) => !!track);
             build.tasks.push({
               name: 'prepareForPublishing',
               needsAwait: true,
