@@ -2883,7 +2883,12 @@ function processPrivateCommand (botId, bot, msg, command, commandArgsRaw) {
           }
           case '/bump': {
             build.tasks.push(resetTask);
-            build.tasks.push(checkoutTask);
+            const checkoutVersionsTask = {
+              name: 'checkoutVersion',
+              description: 'checkoutVersion',
+              cmd: '(git fetch && git checkout -f origin/main version.properties)'
+            };
+            build.tasks.push(checkoutVersionsTask);
             build.tasks.push({
               name: 'bumpVersion',
               script: 'scripts/version_bump.sh'
