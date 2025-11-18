@@ -617,28 +617,28 @@ function duration (start, end, full) {
   return result;
 }
 
-async function traceMaxApkVersionCode (type, versionCode, uploadDate, track) {
-  const isDefault = track === 'googlePlay';
-  const id = isDefault ? type : track + '-' + type;
-  const maxId = isDefault ? 'max' : track + '-max';
+async function traceMaxApkVersionCode (type, versionCode, uploadDate, platform) {
+  const isDefault = platform === 'googlePlay';
+  const id = isDefault ? type : platform + '-' + type;
+  const maxId = isDefault ? 'max' : platform + '-max';
   const cur = await getObject('apk', id);
   const max = await getObject('apk', maxId);
   if (!max || versionCode > max.versionCode) {
-    await storeObject('apk', {versionCode: versionCode, uploadDate: uploadDate, track}, maxId);
+    await storeObject('apk', {versionCode, uploadDate, platform}, maxId);
   }
   if (!cur || versionCode > cur.versionCode) {
-    await storeObject('apk', {versionCode: versionCode, uploadDate: uploadDate, track}, id);
+    await storeObject('apk', {versionCode, uploadDate, platform}, id);
   }
 }
 
-async function canUploadApk (type, versionCode, tracks) {
-  const isDefault = track === 'googlePlay';
-  const max = type === 'universal' ? await getObject('apk', isDefault ? 'max' : track + '-max') : null;
-  for (let i = 0; i < tracks.length; i++) {
-    const track = tracks[i];
-    const id = isDefault ? type : track + '-' + type;
+async function canUploadApk (type, versionCode, platforms) {
+  for (let i = 0; i < platforms.length; i++) {
+    const platform = platforms[i];
+    const isDefault = platform === 'googlePlay';
+    const max = type === 'universal' ? await getObject('apk', isDefault ? 'max' : platform + '-max') : null;
+    const id = isDefault ? type : platform + '-' + type;
     const cur = await getObject('apk', id);
-    const maxVersion = Math.max(cur ? cur.versionCode : 0, type === 'universal' && track === 'googlePlay' && max ? max.versionCode : 0);
+    const maxVersion = Math.max(cur ? cur.versionCode : 0, type === 'universal' && platform === 'googlePlay' && max ? max.versionCode : 0);
     if (versionCode <= maxVersion) {
       return false;
     }
@@ -1055,12 +1055,9 @@ function traceBuiltApk (build, task, variant, checksum, onDone) {
       variant: variant,
       hashAlgorithm: algorithm
     });
-    if (build.googlePlayTrack) {
-      data.googlePlayTrack = build.googlePlayTrack;
-    }
-    if (build.telegramTrack) {
-      data.telegramTrack = build.telegramTrack;
-    }
+    ALL_PLATFORMS.forEach((platform) => {
+      data[platform + 'Track'] = build[platform + 'Track'];
+    })
     db.put('hash_' + hash, data, {valueEncoding: 'json'});
   }
 }
@@ -1304,7 +1301,7 @@ function prepareForPublishing (task, build, onDone) {
       onDone(1);
       return;
     }
-    canUploadApk(variant, files.metadata.versionCode, build.publishingTracks).then((success) => {
+    canUploadApk(variant, files.metadata.versionCode, build.distributionPlatforms).then((success) => {
       if (success) {
         onVariantChecked();
       } else {
@@ -2794,7 +2791,7 @@ function processPrivateCommand (botId, bot, msg, command, commandArgsRaw) {
           }
 
           if (!LOCAL && (build.googlePlayTrack || build.huaweiTrack || build.githubTrack)) {
-            build.publishingTracks = [build.googlePlayTrack, build.huaweiTrack, build.githubTrack].filter((track) => !!track);
+            build.distributionPlatforms = ALL_PLATFORMS.filter((platform) => (platform !== 'telegram' && !!build[platform + 'Track']));
             build.tasks.push({
               name: 'prepareForPublishing',
               needsAwait: true,
@@ -3351,10 +3348,21 @@ function getChecksumMessage (checksum, apk, displayChecksum) {
   text += 'corresponds to ';
   text += '<b>' + (!apk.branch || apk.branch === 'main' ? 'official' : 'unofficial') + ' Telegram X</b> build.';
 
-  if (apk.googlePlayTrack) {
-    text += '\n\n';
-    text += 'This build was published to <b>Google Play' + (apk.googlePlayTrack === 'stable' ? '' : ' ' + ucfirst(apk.googlePlayTrack)) + '</b>.';
-  }
+  ALL_PLATFORMS.forEach((platform) => {
+    if (apk[platform + 'Track']) {
+      switch (platform) {
+        case 'googlePlay': {
+          text += '\n\n';
+          text += 'This build was published to <b>Google Play' + (apk.googlePlayTrack === 'stable' ? '' : ' ' + ucfirst(apk.googlePlayTrack)) + '</b>.';
+          break;
+        }
+        case 'huawei': {
+          text += '\n\n';
+          text += 'This build was published to <b>Huawei AppGallery</b>.';
+        }
+      }
+    }
+  })
 
   text += '\n\n';
   text += '<b>Version</b>: <code>' + apk.version.name + '-' + getDisplayVariant(apk.variant) + '</code>\n';
