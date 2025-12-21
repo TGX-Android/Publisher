@@ -1084,12 +1084,13 @@ function uploadToTelegram (bot, task, build, sdkVariant, abiVariant, onDone) {
   };
 }
 
-function traceBuiltApk (build, task, variant, checksum, onDone) {
+function traceBuiltApk (build, task, sdkVariant, abiVariant, checksum, onDone) {
   for (let algorithm in checksum) {
     const hash = checksum[algorithm];
     const data = toShotBuildInfo(build);
     Object.assign(data, {
-      variant: variant,
+      sdkVariant: sdkVariant,
+      abiVariant: abiVariant,
       hashAlgorithm: algorithm
     });
     ALL_PLATFORMS.forEach((platform) => {
@@ -2887,7 +2888,7 @@ function processPrivateCommand (botId, bot, msg, command, commandArgsRaw) {
                       }
                       build.files[variant.name][abi] = files;
                       if (files.apkFile.checksum) {
-                        traceBuiltApk(build, task, variant, files.apkFile.checksum);
+                        traceBuiltApk(build, task, variant.name, abi, files.apkFile.checksum);
                         if (files.apkFile.checksum.sha256) {
                           task.logPublicly(files.apkFile.checksum.sha256);
                         }
@@ -3509,7 +3510,10 @@ function getChecksumMessage (checksum, apk, displayChecksum) {
   })
 
   text += '\n\n';
-  text += '<b>Version</b>: <code>' + apk.version.name + '-' + getDisplayVariant(apk.variant) + '</code>\n';
+  text += '<b>Version</b>: <code>' + apk.version.name +
+    (apk.sdkVariant && apk.sdkVariant !== 'latest' ? '-' + apk.sdkVariant : '') +
+    '-' + getDisplayVariant(apk.abiVariant || apk.variant || 'unknown') +
+    '</code>\n';
   text += '<b>Commit</b>: <a href="' + apk.remoteUrl + '/tree/' + apk.commit.long + '">' + apk.commit.short + '</a>';
   if (apk.date) {
     text += ', ' + toDisplayDate(apk.date);
