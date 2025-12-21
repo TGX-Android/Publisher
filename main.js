@@ -1021,39 +1021,59 @@ function uploadToTelegram (bot, task, build, sdkVariant, abiVariant, onDone) {
     }
   };
 
-  bot.sendDocument(build.serviceChatId, fs.createReadStream(files.apkFile.path), {
+  const maxUploadAttemptCount = 5;
+
+  const onMappingUploaded = (mappingMessage) => {
+    onDone(0);
+  };
+
+  const onSymbolsUploaded = (symbolsMessage) => {
+    if (!files.mappingFile) { // Mapping file doesn't exist for builds made with --dontobfuscate option
+      onDone(0);
+      return;
+    }
+    attemptAction(maxUploadAttemptCount, (accept, reject) => {
+      bot.sendDocument(build.serviceChatId, fs.createReadStream(files.mappingFile.path), {
+        reply_to_message_id: symbolsMessage.message_id
+      }, {
+        contentType: 'text/plain'
+      }).then(accept).catch(reject);
+    }, (e, attemptNo) => {
+      console.log('[RETRY]', 'Trying again to upload mapping file to Telegram, attemptNo:', attemptNo, e);
+    }).then(onMappingUploaded).catch((e) => {
+      failWithError('Cannot upload mapping file', e);
+    })
+  };
+
+  const onApkUploaded = (apkMessage) => {
+    files.apkFile.remote_id = apkMessage.document.file_id;
+    modifyNativeDebugSymbolsArchive(files.nativeDebugSymbolsFile.path).then((nativeDebugSymbolsPath) => {
+      attemptAction(maxUploadAttemptCount, (accept, reject) => {
+        const nativeDebugSymbolsStream = fs.createReadStream(nativeDebugSymbolsPath);
+        bot.sendDocument(build.serviceChatId, nativeDebugSymbolsStream, {
+          reply_to_message_id: apkMessage.message_id
+        }, {
+          contentType: 'application/zip'
+        }).then(accept).catch(reject);
+      }, (e, attemptNo) => {
+        console.log('[RETRY]', 'Trying again to upload native-debug-symbols.zip to Telegram, attemptNo:', attemptNo, e);
+      }).then(onSymbolsUploaded).catch((e) => {
+        failWithError('Cannot upload native-debug-symbols.zip', e);
+      });
+    });
+  };
+
+  attemptAction(maxUploadAttemptCount, (accept, reject) => {
+    bot.sendDocument(build.serviceChatId, fs.createReadStream(files.apkFile.path), {
       reply_to_message_id: build.serviceMessageId,
       caption: getBuildCaption(build, sdkVariant, abiVariant),
       parse_mode: 'HTML'
     }, {
       contentType: APK_MIME_TYPE
-    }).then((message) => {
-    files.apkFile.remote_id = message.document.file_id;
-    modifyNativeDebugSymbolsArchive(files.nativeDebugSymbolsFile.path).then((nativeDebugSymbolsPath) => {
-      const nativeDebugSymbolsStream = fs.createReadStream(nativeDebugSymbolsPath);
-      bot.sendDocument(build.serviceChatId, nativeDebugSymbolsStream, {
-        reply_to_message_id: message.message_id
-      }, {
-        contentType: 'application/zip'
-      }).then((symbolsMessage) => {
-        if (!files.mappingFile) { // Mapping file doesn't exist for builds made with --dontobfuscate option
-          onDone(0);
-          return;
-        }
-        bot.sendDocument(build.serviceChatId, fs.createReadStream(files.mappingFile.path), {
-          reply_to_message_id: message.message_id
-        }, {
-          contentType: 'text/plain'
-        }).then((mappingMessage) => {
-          onDone(0);
-        }).catch((e) => {
-          failWithError('Cannot upload mapping file', e);
-        })
-      }).catch((e) => {
-        failWithError('Cannot upload native-debug-symbols.zip', e);
-      });
-    });
-  }).catch((e) => {
+    }).then(accept).catch(reject);
+  }, (e, attemptNo) => {
+    console.log('[RETRY]', 'Trying again to upload APK to Telegram, attemptNo:', attemptNo, e);
+  }).then(onApkUploaded).catch((e) => {
     failWithError('Cannot upload telegram file', e);
   });
 
@@ -2260,14 +2280,17 @@ function processPrivateCommand (botId, bot, msg, command, commandArgsRaw) {
     case '/build_arm64':
     case '/build_x86':
     case '/build_x64':
+    case '/build_latest':
     case '/build_latestArm32':
     case '/build_latestArm64':
     case '/build_latestX86':
     case '/build_latestX64':
+    case '/build_lollipop':
     case '/build_lollipopArm32':
     case '/build_lollipopArm64':
     case '/build_lollipopX86':
     case '/build_lollipopX64':
+    case '/build_legacy':
     case '/build_legacyArm32':
     case '/build_legacyX86':
     case '/build_huawei':
