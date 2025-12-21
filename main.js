@@ -617,7 +617,8 @@ function duration (start, end, full) {
   return result;
 }
 
-async function traceMaxApkVersionCode (type, versionCode, uploadDate, platform) {
+async function traceMaxApkVersionCode (sdkVariant, abiVariant, versionCode, uploadDate, platform) {
+  const type = sdkVariant !== 'latest' ? abiVariant + ucfirst(sdkVariant) : abiVariant;
   const isDefault = platform === 'googlePlay';
   const id = isDefault ? type : platform + '-' + type;
   const maxId = isDefault ? 'max' : platform + '-max';
@@ -631,7 +632,8 @@ async function traceMaxApkVersionCode (type, versionCode, uploadDate, platform) 
   }
 }
 
-async function canUploadApk (type, versionCode, platforms) {
+async function canUploadApk (sdkVariant, abiVariant, versionCode, platforms) {
+  const type = sdkVariant !== 'latest' ? abiVariant + ucfirst(sdkVariant) : abiVariant;
   for (let i = 0; i < platforms.length; i++) {
     const platform = platforms[i];
     const isDefault = platform === 'googlePlay';
@@ -745,15 +747,16 @@ function getDisplayVariant (variant) {
   }
 }
 
-function getBuildFiles (build, variant, callback) {
-  const architecture = getDisplayVariant(variant); // == 'universal' ? null : getDisplayVariant(variant);
+function getBuildFiles (build, sdkVariant, abiVariant, callback) {
+  const folder = sdkVariant + ucfirst(abiVariant) ; // latestUniversalRelease
+  const architecture = getDisplayVariant(abiVariant);
   
   const outputsDir = settings.TGX_SOURCE_PATH + '/app/build/outputs';
 
-  const mappingDir = outputsDir + '/mapping/' + variant + 'Release';
-  const apkDir = outputsDir + '/apk/' + variant + '/release';
+  const mappingDir = outputsDir + '/mapping/' + folder + 'Release';
+  const apkDir = outputsDir + '/apk/' + folder + '/release';
 
-  const nativeDebugSymbolsFile = outputsDir + '/native-debug-symbols/' + variant + 'Release' + '/native-debug-symbols.zip';
+  const nativeDebugSymbolsFile = outputsDir + '/native-debug-symbols/' + folder + 'Release' + '/native-debug-symbols.zip';
 
   const result = { };
 
@@ -768,7 +771,13 @@ function getBuildFiles (build, variant, callback) {
     }
   };
 
-  const prefix = '^' + escapeRegExp(build.outputApplication.name || 'Telegram X').replace(/ /g, '-').replace(/#/g, '') + '-' + build.version.name.replace(/\./gi, '\\.') + '(?:\\+[0-9,]+)?' + (architecture ? '(?:-' + architecture + ')?' : '') + (build.outputApplication.extension ? '(?:-' + build.outputApplication.extension + ')?' : '') ;
+  const prefix = '^' + escapeRegExp(build.outputApplication.name || 'Telegram X')
+    .replace(/ /g, '-')
+    .replace(/#/g, '') + '-' +
+    build.version.name.replace(/\./gi, '\\.') + '(?:\\+[0-9,]+)?' +
+    (sdkVariant !== 'latest' ? '(?:-' + sdkVariant + ')?' : '') +
+    (architecture ? '(?:-' + architecture + ')?' : '') +
+    (build.outputApplication.extension ? '(?:-' + build.outputApplication.extension + ')?' : '');
   fs.exists(nativeDebugSymbolsFile, (exists) => {
     result.nativeDebugSymbolsFile = exists ? {path: nativeDebugSymbolsFile} : null;
     check();
@@ -796,7 +805,7 @@ function getBuildFiles (build, variant, callback) {
         const metadata = err ? null : JSON.parse(data);
         if (err || !(metadata &&
             metadata.elements &&
-            metadata.elements.length == 1 &&
+            metadata.elements.length === 1 &&
             metadata.elements[0].versionCode)) {
           console.error('Cannot read metadata file', err, data);
           result.metadata = null;
@@ -851,8 +860,12 @@ function getFromToCommit (build, allowProduction) {
   return null;
 }
 
-function getBuildCaption (build, variant, isPrivate, shortenChecksums) {
-  let caption = '<b>Version</b>: <code>' + build.version.name + '-' + getDisplayVariant(variant) + '</code>';
+function getBuildCaption (build, sdkVariant, abiVariant, isPrivate, shortenChecksums) {
+  let caption = '<b>Version</b>: <code>' +
+    build.version.name +
+    (sdkVariant !== 'latest' ? '-' + sdkVariant : '') +
+    '-' + getDisplayVariant(abiVariant) +
+    '</code>';
   caption += '\n<b>Commit</b>: <a href="' + build.git.remoteUrl + '/tree/' + build.git.commit.long + '">' + build.git.commit.short + '</a>';
   if (build.git.date) {
     caption += ', ' + toDisplayDate(build.git.date);
@@ -865,7 +878,7 @@ function getBuildCaption (build, variant, isPrivate, shortenChecksums) {
   if (!shortenChecksums) {
     caption += '\n';
     checksumAlgorithms.forEach((algorithm) => {
-      const hash = build.files[variant].apkFile.checksum[algorithm];
+      const hash = build.files[sdkVariant][abiVariant].apkFile.checksum[algorithm];
       const url = 'https://t.me/tgx_bot?start=' + hash;
       caption += '\n<b>' + toDisplayAlgorithm(algorithm) + '</b>: <a href="' + url + '">' + hash + '</a>';
     });
@@ -879,7 +892,8 @@ function getBuildCaption (build, variant, isPrivate, shortenChecksums) {
     caption += '\n\n<b>Changes from ' + fromToCommit.from_version.code + '</b>: <a href="' + build.git.remoteUrl + '/compare/' + fromToCommit.commit_range + '">' + fromToCommit.commit_range + '</a>';
   }
 
-  caption += '\n\n#' + variant;
+  caption += '\n\n';
+  caption += '#' + abiVariant + (sdkVariant !== 'latest' ? ucfirst(sdkVariant) : '');
   switch (build.googlePlayTrack) {
     case 'production': caption += ' #stable'; break;
     case 'beta': caption += ' #beta'; break;
@@ -889,7 +903,7 @@ function getBuildCaption (build, variant, isPrivate, shortenChecksums) {
   if (shortenChecksums) {
     caption += ' (';
     checksumAlgorithms.forEach((algorithm, index) => {
-      const hash = build.files[variant].apkFile.checksum[algorithm];
+      const hash = build.files[sdkVariant][abiVariant].apkFile.checksum[algorithm];
       const url = 'https://t.me/tgx_bot?start=' + hash;
       caption += '<b>';
       if (index > 0) {
@@ -903,25 +917,26 @@ function getBuildCaption (build, variant, isPrivate, shortenChecksums) {
   return caption;
 }
 
-function publishToTelegram (bot, task, build, onDone, chatId, onlyPrivate, disableNotification, shortenChecksums) {
+function publishToTelegram (bot, task, build, sdkVariant, onDone, chatId, onlyPrivate, disableNotification, shortenChecksums) {
   const docs = [];
   const variants = [];
-  for (let variant in build.files) {
-    const file_id = build.files[variant].apkFile.remote_id;
+  for (const abiVariant in build.files[sdkVariant]) {
+    const file_id = build.files[sdkVariant][abiVariant].apkFile.remote_id;
     if (file_id) {
       const doc = {
         type: 'document',
         media: file_id,
-        caption: getBuildCaption(build, variant, false, shortenChecksums),
+        caption: getBuildCaption(build, sdkVariant, abiVariant, false, shortenChecksums),
         parse_mode: 'HTML'
       };
-      let ok = variant !== 'universal' || build.variants.length === 1;
+      let ok = (sdkVariant === 'latest' && abiVariant !== 'universal') ||
+        (build.variants.length === 1 && build.variants[0].abi.length === 1);
       if (onlyPrivate) {
         ok = !ok;
       }
       if (ok) {
         docs.push(doc);
-        variants.push(variant);
+        variants.push(abiVariant);
       }
     } else {
       console.log('Some of docs do not have file_id available!');
@@ -939,7 +954,8 @@ function publishToTelegram (bot, task, build, onDone, chatId, onlyPrivate, disab
       for (let i = 0; i < messages.length; i++) {
         const messageId = messages[i].message_id;
         build.publicMessages.push({
-          variant: variants[i],
+          sdkVariant,
+          abiVariant: variants[i],
           message_id: messageId,
           url: messages[i].sender_chat && messages[i].sender_chat.username ? 
             'https://t.me/' + messages[i].sender_chat.username + '/' + messageId :
@@ -967,7 +983,8 @@ function publishToTelegram (bot, task, build, onDone, chatId, onlyPrivate, disab
         build.publicMessages = [];
       }
       build.publicMessages.push({
-        variant: variants[0],
+        sdkVariant,
+        abiVariant: variants[0],
         message_id: message.message_id,
         url: message.sender_chat && message.sender_chat.username ?
           'https://t.me/' + message.sender_chat.username + '/' + message.message_id :
@@ -989,10 +1006,10 @@ function publishToTelegram (bot, task, build, onDone, chatId, onlyPrivate, disab
   }
 }
 
-function uploadToTelegram (bot, task, build, variant, onDone) {
-  const files = build.files[variant];
+function uploadToTelegram (bot, task, build, sdkVariant, abiVariant, onDone) {
+  const files = build.files[sdkVariant][abiVariant];
   if (!files) {
-    console.log('Build files not found for variant', variant);
+    console.log('Build files not found to upload');
     onDone(1);
     return;
   }
@@ -1006,7 +1023,7 @@ function uploadToTelegram (bot, task, build, variant, onDone) {
 
   bot.sendDocument(build.serviceChatId, fs.createReadStream(files.apkFile.path), {
       reply_to_message_id: build.serviceMessageId,
-      caption: getBuildCaption(build, variant),
+      caption: getBuildCaption(build, sdkVariant, abiVariant),
       parse_mode: 'HTML'
     }, {
       contentType: APK_MIME_TYPE
@@ -1259,20 +1276,20 @@ function prepareForPublishing (task, build, onDone) {
       changeLogText += diffUrl;
       build.fallbackReleaseNotes = diffUrl;
       if (build.pullRequestsMetadata || !empty(build.pullRequests)) {
-        changeLog += '\n\nThis version also includes these pull requests:';
+        changeLogText += '\n\nThis version also includes these pull requests:';
         if (build.pullRequestsMetadata) {
           build.pullRequestsMetadata.forEach((pullRequestMetadata) => {
             const pullRequestId = pullRequestMetadata.id;
             const pullRequest = build.pullRequests ? build.pullRequests[pullRequestId] : null;
-            changeLog += '\n';
-            changeLog += build.git.remoteUrl + '/pull/' + pullRequestId + ' at ' + pullRequest.commit.short;
+            changeLogText += '\n';
+            changeLogText += build.git.remoteUrl + '/pull/' + pullRequestId + ' at ' + pullRequest.commit.short;
           });
         } else if (!empty(build.pullRequests)) {
           const pullRequestIds = Object.keys(build.pullRequests);
           pullRequestIds.forEach((pullRequestId) => {
             const pullRequest = build.pullRequests[pullRequestId];
-            changeLog += '\n';
-            changeLog += build.git.remoteUrl + '/pull/' + pullRequestId + ' at ' + pullRequest.commit.short;
+            changeLogText += '\n';
+            changeLogText += build.git.remoteUrl + '/pull/' + pullRequestId + ' at ' + pullRequest.commit.short;
           });
         }
       }
@@ -1290,27 +1307,35 @@ function prepareForPublishing (task, build, onDone) {
 
   for (let i = 0; i < build.variants.length; i++) {
     const variant = build.variants[i];
-    if (!build.files[variant]) {
+    if (!build.files[variant.name]) {
       console.error('Passed variant is not built', variant);
       onDone(1);
       return;
     }
-    const files = build.files[variant];
-    if (files.metadata.versionCode < cur.maximumApkVersionCode) {
-      console.error('Version code is lower than maximum', variant, files.metadata.versionCode, cur.maximumApkVersionCode);
-      onDone(1);
-      return;
-    }
-    canUploadApk(variant, files.metadata.versionCode, build.distributionPlatforms).then((success) => {
-      if (success) {
-        onVariantChecked();
-      } else {
-        const msg = 'APK #' + build.version.name + ' was already published. Version bump required.';
-        task.logPublicly(msg);
-        console.error(msg);
+    for (let abiIndex = 0; abiIndex < variant.abi.length; abiIndex++) {
+      const abiVariant = variant.abi[abiIndex];
+      const files = build.files[variant.name][abiVariant];
+      if (!files) {
+        console.error('Passed variant is not built', variant.name, abiVariant);
         onDone(1);
+        return;
       }
-    });
+      if (files.metadata.versionCode < cur.maximumApkVersionCode) {
+        console.error('Version code is lower than maximum', variant, files.metadata.versionCode, cur.maximumApkVersionCode);
+        onDone(1);
+        return;
+      }
+      canUploadApk(variant.name, abiVariant, files.metadata.versionCode, build.distributionPlatforms).then((success) => {
+        if (success) {
+          onVariantChecked();
+        } else {
+          const msg = 'APK #' + build.version.name + ' was already published. Version bump required.';
+          task.logPublicly(msg);
+          console.error(msg);
+          onDone(1);
+        }
+      });
+    }
   }
 
   return async () => {
@@ -1327,7 +1352,13 @@ function uploadToGooglePlay (task, build, onDone) {
     console.log('Created an AppEdit', JSON.stringify(appEdit));
     const editId = appEdit.data.id;
 
-    let remainingApkCount = build.variants.length;
+    let remainingApkCount = 0;
+    build.variants.forEach((variant) => {
+      variant.abi.forEach((abi) => {
+        remainingApkCount++;
+      });
+    });
+
     const uploadedVersionCodes = [];
     let onBuildUploaded = (uploadedBuildVariant) => {
       if (--remainingApkCount !== 0)
@@ -1367,79 +1398,77 @@ function uploadToGooglePlay (task, build, onDone) {
     };
     for (let i = 0; i < build.variants.length; i++) {
       const variant = build.variants[i];
-      if (build.variants.length > 1 && variant === 'universal') {
-        onBuildUploaded(variant);
-        continue;
-      }
-      const files = build.files[variant];
-      const apkStream = fs.createReadStream(files.apkFile.path);
+      for (let abiIndex = 0; abiIndex < variant.abi.length; abiIndex++) {
+        const abiVariant = variant.abi[abiIndex];
+        if (abiVariant === 'universal') {
+          onBuildUploaded(variant, abiVariant);
+          continue;
+        }
+        const files = build.files[variant.name][abiVariant];
+        const apkStream = fs.createReadStream(files.apkFile.path);
 
-      play.edits.apks.upload({
-        editId: editId,
-        media: {
-          mimeType: APK_MIME_TYPE,
-          body: apkStream
-        }
-      }).then((uploadedApk) => {
-        console.log('Successfully uploaded APK', JSON.stringify(uploadedApk));
-        traceMaxApkVersionCode(variant, uploadedApk.data.versionCode, new Date(), 'googlePlay');
-        if (uploadedApk.data.binary.sha256 !== files.apkFile.checksum.sha256) {
-          console.error('SHA-256 mismatch!', variant);
-          task.logPublicly('SHA-256 mismatch!');
-          onDone(1);
-          return;
-        }
-        uploadedVersionCodes.push(uploadedApk.data.versionCode);
-        modifyNativeDebugSymbolsArchive(files.nativeDebugSymbolsFile.path).then((nativeDebugSymbolsPath) => {
-          attemptAction(5, (accept, reject) => {
-            const nativeDebugSymbolsStream = fs.createReadStream(nativeDebugSymbolsPath);
-            play.edits.deobfuscationfiles.upload({
-              editId: editId,
-              deobfuscationFileType: 'nativeCode',
-              apkVersionCode: uploadedApk.data.versionCode,
-              media: {
-                mimeType: ZIP_MIME_TYPE,
-                body: nativeDebugSymbolsStream
-              }
-            })
-            .then(accept)
-            .catch(reject);
-          }, (e, attemptNo) => {
-            console.log('[RETRY]', 'Trying again to upload native-debug-symbols.zip, attemptNo:', attemptNo, e);
-          }).then((uploadedNativeDebugSymbols) => {
-            console.log('[!!!]', 'native-debug-symbols.zip uploaded', variant, JSON.stringify(uploadedNativeDebugSymbols));
-            const mappingStream = fs.createReadStream(files.mappingFile.path);
-            play.edits.deobfuscationfiles.upload({
-              editId: editId,
-              deobfuscationFileType: 'proguard',
-              apkVersionCode: uploadedApk.data.versionCode,
-              media: {
-                mimeType: TXT_MIME_TYPE,
-                body: mappingStream
-              }
-            }).then((uploadedMappingFile) => {
-              mappingStream.close();
-              console.log('Mapping file uploaded', variant, JSON.stringify(uploadedMappingFile));
-              // Success! Now we can proceed.
-              onBuildUploaded(variant);
-            }).catch((mappingFileUploadError) => {
-              console.error('Failed to upload mapping file.', variant, mappingFileUploadError);
+        play.edits.apks.upload({
+          editId: editId,
+          media: {
+            mimeType: APK_MIME_TYPE,
+            body: apkStream
+          }
+        }).then((uploadedApk) => {
+          console.log('Successfully uploaded APK', JSON.stringify(uploadedApk));
+          traceMaxApkVersionCode(variant.name, abiVariant, uploadedApk.data.versionCode, new Date(), 'googlePlay');
+          if (uploadedApk.data.binary.sha256 !== files.apkFile.checksum.sha256) {
+            console.error('SHA-256 mismatch!', variant.name, abiVariant);
+            task.logPublicly('SHA-256 mismatch!');
+            onDone(1);
+            return;
+          }
+          uploadedVersionCodes.push(uploadedApk.data.versionCode);
+          modifyNativeDebugSymbolsArchive(files.nativeDebugSymbolsFile.path).then((nativeDebugSymbolsPath) => {
+            attemptAction(5, (accept, reject) => {
+              const nativeDebugSymbolsStream = fs.createReadStream(nativeDebugSymbolsPath);
+              play.edits.deobfuscationfiles.upload({
+                editId: editId,
+                deobfuscationFileType: 'nativeCode',
+                apkVersionCode: uploadedApk.data.versionCode,
+                media: {
+                  mimeType: ZIP_MIME_TYPE,
+                  body: nativeDebugSymbolsStream
+                }
+              })
+                .then(accept)
+                .catch(reject);
+            }, (e, attemptNo) => {
+              console.log('[RETRY]', 'Trying again to upload native-debug-symbols.zip, attemptNo:', attemptNo, e);
+            }).then((uploadedNativeDebugSymbols) => {
+              console.log('[!!!]', 'native-debug-symbols.zip uploaded', variant.name, abiVariant, JSON.stringify(uploadedNativeDebugSymbols));
+              const mappingStream = fs.createReadStream(files.mappingFile.path);
+              play.edits.deobfuscationfiles.upload({
+                editId: editId,
+                deobfuscationFileType: 'proguard',
+                apkVersionCode: uploadedApk.data.versionCode,
+                media: {
+                  mimeType: TXT_MIME_TYPE,
+                  body: mappingStream
+                }
+              }).then((uploadedMappingFile) => {
+                mappingStream.close();
+                console.log('Mapping file uploaded', variant.name, abiVariant, JSON.stringify(uploadedMappingFile));
+                // Success! Now we can proceed.
+                onBuildUploaded(variant);
+              }).catch((mappingFileUploadError) => {
+                console.error('Failed to upload mapping file.', variant.name, abiVariant, mappingFileUploadError);
+                onDone(1);
+              });
+            }).catch((nativeDebugSymbolsUploadError) => {
+              console.error('Failed to upload native-debug-symbols.zip', variant.name, abiVariant, nativeDebugSymbolsUploadError);
               onDone(1);
             });
-          }).catch((nativeDebugSymbolsUploadError) => {
-            console.error('Failed to upload native-debug-symbols.zip', variant, nativeDebugSymbolsUploadError);
-            onDone(1);
           });
+        }).catch((apkUploadError) => {
+          console.error('Failed to upload apk', variant.name, abiVariant, apkUploadError);
+          onDone(1);
         });
-      }).catch((apkUploadError) => {
-        console.error('Failed to upload apk', variant, apkUploadError);
-        onDone(1);
-      });
-
-      /*media: {
-        mimeType: ,
-        body: apk
-      }*/
+      }
     }
   }).catch((appEditError) => {
     console.error('Failed to create AppEdit', appEditError);
@@ -1622,8 +1651,9 @@ async function submitHuaweiAppUpdate (accessToken) {
 
 function uploadToHuaweiAppGallery (task, build, onDone, draftOnly) {
   (async () => {
-    const buildType = build.files['huawei'] ? 'huawei' : 'universal';
-    const targetFiles = build.files[buildType];
+    const sdkVariant = 'latest';
+    const abiVariant = 'universal';
+    const targetFiles = build.files[sdkVariant][abiVariant];
     // Step 1. Obtain access_token
     const auth = await obtainHuaweiAccessToken();
     if (!auth || !auth.access_token) {
@@ -1695,7 +1725,7 @@ function uploadToHuaweiAppGallery (task, build, onDone, draftOnly) {
       }
     }
 
-    await traceMaxApkVersionCode(buildType, build.version.code, new Date(), 'huawei');
+    await traceMaxApkVersionCode(sdkVariant, abiVariant, build.version.code, new Date(), 'huawei');
     console.log('Successfully published Huawei AppGallery');
     onDone(0);
   })();
@@ -1904,30 +1934,41 @@ function uploadToGithub (task, build, onDone, commandArgsRaw, isPrerelease, tagN
 
   changeLog += '<details><summary>Checksums for <code>' + versionName + '</code>. Tap to expand</summary>';
 
-  const allVariants = ['universal', 'arm64', 'arm32', 'x64', 'x86'];
-  const builtVariants = Object.keys(build.files).sort((a, b) => {
-    const aIndex = allVariants.indexOf(a);
-    const bIndex = allVariants.indexOf(b);
-    const aKnown = aIndex !== -1;
-    const bKnown = bIndex !== -1;
-    if (aKnown != bKnown) {
-      return aKnown ? -1 : 1;
+  const allSdkFlavors = [ 'latest', 'lollipop', 'legacy' ];
+  const allAbiFlavors = ['universal', 'arm64', 'arm32', 'x64', 'x86'];
+  const sortBy = (variants) => {
+    return (a, b) => {
+      const aIndex = variants.indexOf(a);
+      const bIndex = variants.indexOf(b);
+      const aKnown = aIndex !== -1;
+      const bKnown = bIndex !== -1;
+      if (aKnown !== bKnown) {
+        return aKnown ? -1 : 1;
+      }
+      if (aIndex !== bIndex) {
+        return aIndex < bIndex ? -1 : 1;
+      }
+      return 0;
     }
-    if (aIndex != bIndex) {
-      return aIndex < bIndex ? -1 : 1;
-    }
-    return 0;
+  };
+  const builtVariants = Object.keys(build.files)
+      .sort(sortBy(allSdkFlavors))
+      .map((sdkFlavor) => {
+    const abiVariants = Object.keys(build.files[sdkFlavor]).sort(sortBy(allAbiFlavors));
+    return {name: sdkFlavor, abi: abiVariants};
   });
   builtVariants.forEach((variant) => {
-    const files = build.files[variant];
-    changeLog += '\n\n---';
-    changeLog += '\n\n#### ' + getDisplayVariant(variant) + '\n';
-    ['sha256', 'sha1', 'md5'].forEach((algorithm) => {
-      const hash = files.apkFile.checksum[algorithm];
-      if (hash) {
-        changeLog += '\n**' + toDisplayAlgorithm(algorithm) + '**: ';
-        changeLog += '[' + hash + '](https://t.me/tgx_bot?start=' + hash + ')';
-      }
+    variant.abi.forEach((abiVariant) => {
+      const files = build.files[variant.name][abiVariant];
+      changeLog += '\n\n---';
+      changeLog += '\n\n#### ' + getDisplayVariant(variant) + '\n';
+      ['sha256', 'sha1', 'md5'].forEach((algorithm) => {
+        const hash = files.apkFile.checksum[algorithm];
+        if (hash) {
+          changeLog += '\n**' + toDisplayAlgorithm(algorithm) + '**: ';
+          changeLog += '[' + hash + '](https://t.me/tgx_bot?start=' + hash + ')';
+        }
+      });
     });
   });
 
@@ -1949,15 +1990,24 @@ function uploadToGithub (task, build, onDone, commandArgsRaw, isPrerelease, tagN
 
       console.log('Created GitHub release, uploading asset...');
 
-      const apkFileName = settings.app.name.replace(/ /gi, '-') + '-' + build.version.name + (isPrerelease ? '-' + build.githubTrack : '') + '.apk';
-      const apkLabel = settings.app.name + ' ' + build.version.name + (isPrerelease ? ' ' + build.githubTrack : '');
-      const uploadResult = await uploadGitHubAsset(release, build.files.universal.apkFile.path, apkFileName, apkLabel);
-      if (!uploadResult) {
-        console.error('Upload GitHub asset failed, deleting release...');
-        await deleteGitHubRelease(owner, repository, release.id);
+      for (const sdkFlavor in build.files) {
+        const files = build.files[sdkFlavor].universal;
+        if (files) {
+          const apkFileName = settings.app.name.replace(/ /gi, '-') + '-' +
+              build.version.name + (sdkFlavor !== 'latest' ? '-' + sdkFlavor : '') +
+              (isPrerelease ? '-' + build.githubTrack : '') + '.apk';
+          const apkLabel = settings.app.name + ' ' +
+              build.version.name + (sdkFlavor !== 'latest' ? '-' + sdkFlavor : '') +
+              (isPrerelease ? ' ' + build.githubTrack : '');
+          const uploadResult = await uploadGitHubAsset(release, files.apkFile.path, apkFileName, apkLabel);
+          if (!uploadResult) {
+            console.error('Upload GitHub asset failed, deleting release...');
+            await deleteGitHubRelease(owner, repository, release.id);
 
-        onDone(1);
-        return;
+            onDone(1);
+            return;
+          }
+        }
       }
 
       if (!draftOnly) {
@@ -1967,9 +2017,13 @@ function uploadToGithub (task, build, onDone, commandArgsRaw, isPrerelease, tagN
           onDone(1);
           return;
         }
+        for (const sdkFlavor in build.files) {
+          const files = build.files[sdkFlavor].universal;
+          if (files) {
+            await traceMaxApkVersionCode(sdkFlavor, 'universal', build.version.code, new Date(), 'github');
+          }
+        }
       }
-
-      await traceMaxApkVersionCode('universal', build.version.code, new Date(), 'github');
 
       console.log('Cleaning up previous GitHub pre-releases...');
       await deletePastGitHubPrereleases(owner, repository, isPrerelease ? release.id : undefined);
@@ -2206,6 +2260,16 @@ function processPrivateCommand (botId, bot, msg, command, commandArgsRaw) {
     case '/build_arm64':
     case '/build_x86':
     case '/build_x64':
+    case '/build_latestArm32':
+    case '/build_latestArm64':
+    case '/build_latestX86':
+    case '/build_latestX64':
+    case '/build_lollipopArm32':
+    case '/build_lollipopArm64':
+    case '/build_lollipopX86':
+    case '/build_lollipopX64':
+    case '/build_legacyArm32':
+    case '/build_legacyX86':
     case '/build_huawei':
     case '/build_universal':
 
@@ -2241,19 +2305,61 @@ function processPrivateCommand (botId, bot, msg, command, commandArgsRaw) {
           return;
         }
 
-        const buildType = command === '/build' ? 'all' : command.includes('_') ? command.substring(command.indexOf('_') + 1) : command.substring(1);
+        const buildType = command === '/build' ? 'all' :
+          command.startsWith('/deploy') || command.startsWith('/build') ?
+          (command.includes('_') ? command.substring(command.indexOf('_') + 1) : 'all') :
+          'none';
 
-        // TODO huawei flavor with HPS instead of FCM
-        const allVariants = ['universal', 'arm64', 'arm32', 'x64', 'x86'];
+        const allVariants = [
+          {name: 'latest', abi: [ 'universal', 'arm64', 'arm32', 'x64', 'x86' ]},
+          {name: 'lollipop', abi: [ 'arm64', 'arm32', 'x64', 'x86' ]},
+          {name: 'legacy', abi: [ 'arm32', 'x86' ]}
+        ];
 
-        let specificVariant = buildType;
-        if (!allVariants.includes(specificVariant)) {
-          if (['all', 'stable', 'beta', 'alpha'].includes(buildType)) {
-            specificVariant = null;
-          } else if (buildType === 'huawei' || buildType === 'github') {
-            specificVariant = 'universal';
+        let selectedVariants = [];
+        switch (buildType) {
+          case 'none':
+            break;
+          case 'all':
+          case 'alpha':
+          case 'beta':
+          case 'stable':
+            selectedVariants = allVariants;
+            break;
+          case 'latest':
+          case 'lollipop':
+          case 'legacy':
+            selectedVariants = allVariants.filter((variant) =>
+              variant.name === buildType
+            );
+            break;
+          case 'universal':
+          case 'arm64':
+          case 'arm32':
+          case 'x86':
+          case 'x64':
+            selectedVariants = [{name: 'latest', abi: [buildType]}];
+            break;
+          case 'pr':
+          case 'huawei':
+          case 'github':
+            selectedVariants = [{name: 'latest', abi: ['universal']}];
+            break;
+          default: {
+            allVariants.forEach((variant) => {
+              variant.abi.forEach(abi => {
+                const prefix = variant.name + ucfirst(abi);
+                if (buildType === prefix) {
+                  selectedVariants = [{name: variant.name, abi: [abi]}];
+                }
+              });
+            });
+            break;
           }
         }
+        selectedVariants = selectedVariants.filter((variant) =>
+          variant.abi.length > 0
+        );
 
         const commandArgsList = commandArgsRaw ? commandArgsRaw.split(/[,\s]+/) : [];
         const commandArgs = commandArgsList.filter((arg) => arg.startsWith('--')).reduce((result, item) => {
@@ -2347,7 +2453,7 @@ function processPrivateCommand (botId, bot, msg, command, commandArgsRaw) {
           return;
         }
 
-        build.variants = specificVariant != null ? [specificVariant] : allVariants;
+        build.variants = selectedVariants;
         build.tasks = [];
         const initTask = {
           name: 'init',
@@ -2723,75 +2829,90 @@ function processPrivateCommand (botId, bot, msg, command, commandArgsRaw) {
             }
           };
           build.tasks.push(restorePullRequestsListTask);
-          build.variants.forEach((originalVariant) => {
-            const variant = ucfirst(originalVariant);
+          build.variants.forEach((variant) => {
+            const variantsSuffix =
+              ucfirst(variant.name) +
+              variant.abi.map(ucfirst).join('+');
             if (!skipBuild) {
+              const args = [];
+              variant.abi.forEach((abi) => {
+                args.push('assemble' + ucfirst(variant.name) + ucfirst(abi) + 'Release');
+              });
               const buildTask = {
-                name: 'assemble' + variant,
+                name: 'assemble' + variantsSuffix,
                 script: 'gradlew',
-                args: [
-                  'assemble' + variant + 'Release',
+                args: args.concat([
                   LOCAL ? '--info' : '--quiet',
                   '--stacktrace',
                   '--console=plain',
                   '--parallel',
                   '--no-configuration-cache',
                   '--max-workers=' + threadCount
-                ]
+                ])
               };
               build.tasks.push(buildTask);
             }
-            build.tasks.push({
-              name: 'verify' + variant,
-              act: (task, callback) => {
-                getBuildFiles(build, originalVariant, (files) => {
-                  if (!build.aborted && files) {
-                    build.files[originalVariant] = files;
-                    if (files.apkFile.checksum) {
-                      traceBuiltApk(build, task, originalVariant, files.apkFile.checksum);
-                      if (files.apkFile.checksum.sha256) {
-                        task.logPublicly(files.apkFile.checksum.sha256);
+            variant.abi.forEach((abi) => {
+              const variantSuffix = ucfirst(variant.name) + ucfirst(abi);
+              build.tasks.push({
+                name: 'verify' + variantSuffix,
+                act: (task, callback) => {
+                  getBuildFiles(build, variant.name, abi, (files) => {
+                    if (!build.aborted && files) {
+                      if (!build.files[variant.name]) {
+                        build.files[variant.name] = {};
                       }
+                      build.files[variant.name][abi] = files;
+                      if (files.apkFile.checksum) {
+                        traceBuiltApk(build, task, variant, files.apkFile.checksum);
+                        if (files.apkFile.checksum.sha256) {
+                          task.logPublicly(files.apkFile.checksum.sha256);
+                        }
+                      }
+                      callback(0);
+                    } else {
+                      callback(1);
                     }
-                    callback(0);
-                  } else {
-                    callback(1);
+                  });
+                }
+              });
+              build.tasks.push({
+                name: 'upload' + variantSuffix,
+                isAsync: true,
+                act: (task, callback) => {
+                  return uploadToTelegram(bot, task, build, variant.name, abi, callback);
+                }
+              });
+            });
+
+            if (variant.name === 'latest') {
+              if (build.publicChatId && (build.telegramTrack || isPRBuild) && (build.variants.length > 1 || variant.abi.length > 1)) {
+                build.tasks.push({
+                  name: 'publishTelegramInternal',
+                  needsAwait: true,
+                  act: (task, callback) => {
+                    return publishToTelegram(bot, task, build, variant.name, callback, isPRBuild ? INTERNAL_CHAT_ID : ALPHA_CHAT_ID, true, false);
                   }
                 });
               }
-            });
-            build.tasks.push({
-              name: 'upload' + variant,
-              isAsync: true,
-              act: (task, callback) => {
-                return uploadToTelegram(bot, task, build, originalVariant, callback);
+              if (build.publicChatId && (build.telegramTrack || isPRBuild)) {
+                const id = isPRBuild ? 'PR' : build.telegramTrack.startsWith('private') ? 'Private' : ucfirst(build.telegramTrack);
+                const targetChatId = (build.googlePlayTrack === 'production') ? ALPHA_CHAT_ID : build.publicChatId;
+                build.tasks.push({
+                  name: 'publishTelegram' + id + (build.googlePlayTrack === 'production' ? 'Draft' : ''),
+                  needsAwait: true,
+                  act: (task, callback) => {
+                    return publishToTelegram(bot, task, build, variant.name, callback, targetChatId, false, true, true);
+                  }
+                });
               }
-            });
-            if (build.publicChatId && (build.telegramTrack || isPRBuild) && originalVariant === 'universal' && build.variants.length > 1) {
-              build.tasks.push({
-                name: 'publishTelegramInternal',
-                needsAwait: true,
-                act: (task, callback) => {
-                  return publishToTelegram(bot, task, build, callback, isPRBuild ? INTERNAL_CHAT_ID : ALPHA_CHAT_ID, true, false);
-                }
-              });
             }
           });
 
-          if (build.publicChatId && (build.telegramTrack || isPRBuild)) {
-            const id = isPRBuild ? 'PR' : build.telegramTrack.startsWith('private') ? 'Private' : ucfirst(build.telegramTrack);
-            const targetChatId = (build.googlePlayTrack === 'production') ? ALPHA_CHAT_ID : build.publicChatId;
-            build.tasks.push({
-              name: 'publishTelegram' + id + (build.googlePlayTrack === 'production' ? 'Draft' : ''),
-              needsAwait: true,
-              act: (task, callback) => {
-                return publishToTelegram(bot, task, build, callback, targetChatId, false, true, true);
-              }
-            });
-          }
-
           if (!LOCAL && (build.googlePlayTrack || build.huaweiTrack || build.githubTrack)) {
-            build.distributionPlatforms = ALL_PLATFORMS.filter((platform) => (platform !== 'telegram' && !!build[platform + 'Track']));
+            build.distributionPlatforms = ALL_PLATFORMS.filter((platform) =>
+              (platform !== 'telegram' && !!build[platform + 'Track'])
+            );
             build.tasks.push({
               name: 'prepareForPublishing',
               needsAwait: true,
@@ -2967,7 +3088,7 @@ function processPrivateCommand (botId, bot, msg, command, commandArgsRaw) {
               for (let i = 0; i < build.publicMessages.length; i++) {
                 const publicMessage = build.publicMessages[i];
                 if (publicMessage.url) {
-                  variantLinks.push('<a href="' + publicMessage.url + '">' + publicMessage.variant + '</a>');
+                  variantLinks.push('<a href="' + publicMessage.url + '">' + publicMessage.abiVariant + (publicMessage.sdkVariant !== 'latest' ? ucfirst(publicMessage.sdkVariant) : '') + '</a>');
                 }
               }
             }
