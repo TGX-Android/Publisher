@@ -357,13 +357,7 @@ function getGitData (callback) {
       throw error;
     }
     const result = trimIndent(stdout).trim().split(' ', 6);
-    let remoteUrl = result[3];
-    if (remoteUrl.startsWith('git@')) {
-      let index = remoteUrl.indexOf(':', 4);
-      let domain = remoteUrl.substring(4, index);
-      let endIndex = remoteUrl.endsWith('.git') ? remoteUrl.length - 4 : remoteUrl.length;
-      remoteUrl = 'https://' + domain + '/' + remoteUrl.substring(index + 1, endIndex);
-    }
+    let remoteUrl = sshToHttpUrl(result[3]);
     callback({
       commit: {
         short: result[0],
@@ -826,18 +820,40 @@ function getBuildFiles (build, sdkVariant, abiVariant, callback) {
   });
 }
 
+function sshToHttpUrl (a) {
+  if (a.startsWith('ssh://git@')) {
+    return 'https://' + a.substring(10);
+  }
+  if (a.startsWith('git@')) {
+    let index = a.indexOf(':', 4);
+    let domain = a.substring(4, index);
+    let endIndex = a.endsWith('.git') ? a.length - 4 : a.length;
+    return 'https://' + domain + '/' + a.substring(index + 1, endIndex);
+  }
+  return a;
+}
+
+function compareRemoteUrls (a, b) {
+  if (a === b) {
+    return true;
+  }
+  const aHttp = sshToHttpUrl(a);
+  const bHttp = sshToHttpUrl(b);
+  return aHttp === bHttp || a.toLowerCase() === b.toLowerCase();
+}
+
 function getFromToCommit (build, allowProduction) {
   if (build.outputApplication && build.outputApplication.isPRBuild)
     return null;
   if (build.googlePlayTrack) {
     let googlePlayBuild = allowProduction ? build.previousGooglePlayProductionBuild : null;
     if (!(googlePlayBuild &&
-        googlePlayBuild.remoteUrl === build.git.remoteUrl &&
+        compareRemoteUrls(googlePlayBuild.remoteUrl, build.git.remoteUrl) &&
         googlePlayBuild.branch === build.git.branch)) {
       googlePlayBuild = build.previousGooglePlayBuild;
     }
     if (googlePlayBuild &&
-        googlePlayBuild.remoteUrl === build.git.remoteUrl &&
+        compareRemoteUrls(googlePlayBuild.remoteUrl, build.git.remoteUrl) &&
         googlePlayBuild.branch === build.git.branch) {
       return {
         commit_range: googlePlayBuild.commit.short + '...' + build.git.commit.short,
@@ -848,7 +864,7 @@ function getFromToCommit (build, allowProduction) {
   } else if (build.telegramTrack) {
     const telegramBuild = build.previousTelegramBuild;
     if (telegramBuild &&
-        telegramBuild.remoteUrl === build.git.remoteUrl &&
+        compareRemoteUrls(telegramBuild.remoteUrl, build.git.remoteUrl) &&
         telegramBuild.branch === build.git.branch) {
       return {
         commit_range: telegramBuild.commit.short + '...' + build.git.commit.short,
