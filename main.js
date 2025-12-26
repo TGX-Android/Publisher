@@ -877,17 +877,41 @@ function getFromToCommit (build, allowProduction) {
 }
 
 function getBuildCaption (build, sdkVariant, abiVariant, isPrivate, shortenChecksums) {
+  const fromToCommit = getFromToCommit(build,
+    build.googlePlayTrack && build.previousGooglePlayProductionBuild && build.previousGooglePlayBuild &&
+    build.previousGooglePlayBuild.version.code < build.previousGooglePlayProductionBuild.version.code
+  );
+
   let caption = '<b>Version</b>: <code>' +
     build.version.name +
     (sdkVariant !== 'latest' ? '-' + sdkVariant : '') +
     '-' + getDisplayVariant(abiVariant) +
     '</code>';
-  caption += '\n<b>Commit</b>: <a href="' + build.git.remoteUrl + '/tree/' + build.git.commit.long + '">' + build.git.commit.short + '</a>';
-  if (build.git.date) {
-    caption += ', ' + toDisplayDate(build.git.date);
+  if (fromToCommit) {
+    caption += '\n<b>Changes from ' + fromToCommit.from_version.code + '</b>: <a href="' + build.git.remoteUrl + '/compare/' + fromToCommit.commit_range + '">' + fromToCommit.commit_range + '</a>';
+  } else {
+    caption += '\n<b>Commit</b>: <a href="' + build.git.remoteUrl + '/tree/' + build.git.commit.long + '">' + build.git.commit.short + '</a>';
+    if (build.git.date) {
+      caption += ', ' + toDisplayDate(build.git.date);
+    }
   }
   if (build.pullRequestsMetadata || !empty(build.pullRequests)) {
     caption += '\n<b>Pull requests</b>: ' + toDisplayPullRequestList(build);
+  }
+
+  switch (sdkVariant) {
+    case 'latest': {
+      // caption += '\n\n<b>For Android 6 (Marshmallow) devices.'
+      break;
+    }
+    case 'lollipop': {
+      caption += '\n<b>Supports</b>: Android Lollipop only (<b>21–22</b>)'
+      break;
+    }
+    case 'legacy': {
+      caption += '\n<b>Supports</b>: Android Jelly Bean & KitKat only (<b>16–20</b>)'
+      break;
+    }
   }
 
   const checksumAlgorithms = ['md5', 'sha1', 'sha256'];
@@ -898,14 +922,6 @@ function getBuildCaption (build, sdkVariant, abiVariant, isPrivate, shortenCheck
       const url = 'https://t.me/tgx_bot?start=' + hash;
       caption += '\n<b>' + toDisplayAlgorithm(algorithm) + '</b>: <a href="' + url + '">' + hash + '</a>';
     });
-  }
-
-  const fromToCommit = getFromToCommit(build,
-    build.googlePlayTrack && build.previousGooglePlayProductionBuild && build.previousGooglePlayBuild &&
-    build.previousGooglePlayBuild.version.code < build.previousGooglePlayProductionBuild.version.code
-  );
-  if (fromToCommit) {
-    caption += '\n\n<b>Changes from ' + fromToCommit.from_version.code + '</b>: <a href="' + build.git.remoteUrl + '/compare/' + fromToCommit.commit_range + '">' + fromToCommit.commit_range + '</a>';
   }
 
   caption += '\n\n';
@@ -945,7 +961,8 @@ function publishToTelegram (bot, task, build, sdkVariant, onDone, chatId, onlyPr
         caption: getBuildCaption(build, sdkVariant, abiVariant, false, shortenChecksums),
         parse_mode: 'HTML'
       };
-      let ok = (sdkVariant === 'latest' && abiVariant !== 'universal') ||
+      let ok =
+        (abiVariant !== 'universal' && abiVariant !== 'x86' && abiVariant !== 'x64') ||
         (build.variants.length === 1 && build.variants[0].abi.length === 1);
       if (onlyPrivate) {
         ok = !ok;
@@ -2027,22 +2044,44 @@ function uploadToGithub (task, build, onDone, commandArgsRaw, isPrerelease, tagN
 
       console.log('Created GitHub release, uploading asset...');
 
+      const toPublish = {
+        'latest': ['universal'],
+        'lollipop': ['universal'],
+        'legacy': ['arm32']
+      };
       for (const sdkFlavor in build.files) {
-        const files = build.files[sdkFlavor].universal;
-        if (files) {
-          const apkFileName = settings.app.name.replace(/ /gi, '-') + '-' +
+        for (const abiFlavor in build.files[sdkFlavor]) {
+          const files = build.files[sdkFlavor][abiFlavor];
+          if (files && toPublish[sdkFlavor] && toPublish[sdkFlavor].includes(abiFlavor)) {
+            const apkFileName = settings.app.name.replace(/ /gi, '-') + '-' +
               build.version.name + (sdkFlavor !== 'latest' ? '-' + sdkFlavor : '') +
               (isPrerelease ? '-' + build.githubTrack : '') + '.apk';
-          const apkLabel = settings.app.name + ' ' +
+            const apkLabel = settings.app.name + ' ' +
               build.version.name + (sdkFlavor !== 'latest' ? '-' + sdkFlavor : '') +
               (isPrerelease ? ' ' + build.githubTrack : '');
-          const uploadResult = await uploadGitHubAsset(release, files.apkFile.path, apkFileName, apkLabel);
-          if (!uploadResult) {
-            console.error('Upload GitHub asset failed, deleting release...');
-            await deleteGitHubRelease(owner, repository, release.id);
+            let uploadResult = null;
+            let errorCount = 0;
+            do {
+              try {
+                uploadResult = await uploadGitHubAsset(release, files.apkFile.path, apkFileName, apkLabel);
+                break;
+              } catch (err) {
+                errorCount++;
+                if (errorCount > 3) {
+                  console.error('Upload GitHub asset failed...', err);
+                } else {
+                  console.error('Upload GitHub asset failed, retrying...', errorCount, err);
+                  await sleep(errorCount * 1000);
+                }
+              }
+            } while (!uploadResult && errorCount <= 3)
+            if (!uploadResult) {
+              console.error('Upload GitHub asset failed, deleting release...');
+              await deleteGitHubRelease(owner, repository, release.id);
 
-            onDone(1);
-            return;
+              onDone(1);
+              return;
+            }
           }
         }
       }
@@ -2925,27 +2964,28 @@ function processPrivateCommand (botId, bot, msg, command, commandArgsRaw) {
               });
             });
 
-            if (variant.name === 'latest') {
-              if (build.publicChatId && (build.telegramTrack || isPRBuild) && (build.variants.length > 1 || variant.abi.length > 1)) {
-                build.tasks.push({
-                  name: 'publishTelegramInternal',
-                  needsAwait: true,
-                  act: (task, callback) => {
-                    return publishToTelegram(bot, task, build, variant.name, callback, isPRBuild ? INTERNAL_CHAT_ID : ALPHA_CHAT_ID, true, false);
-                  }
-                });
-              }
-              if (build.publicChatId && (build.telegramTrack || isPRBuild)) {
-                const id = isPRBuild ? 'PR' : build.telegramTrack.startsWith('private') ? 'Private' : ucfirst(build.telegramTrack);
-                const targetChatId = (build.googlePlayTrack === 'production') ? ALPHA_CHAT_ID : build.publicChatId;
-                build.tasks.push({
-                  name: 'publishTelegram' + id + (build.googlePlayTrack === 'production' ? 'Draft' : ''),
-                  needsAwait: true,
-                  act: (task, callback) => {
-                    return publishToTelegram(bot, task, build, variant.name, callback, targetChatId, false, true, true);
-                  }
-                });
-              }
+            if (variant.name === 'latest' && build.publicChatId && (build.telegramTrack || isPRBuild) && (build.variants.length > 1 || variant.abi.length > 1)) {
+              build.tasks.push({
+                name: 'publishTelegramInternal',
+                needsAwait: true,
+                act: (task, callback) => {
+                  return publishToTelegram(bot, task, build, variant.name, callback, isPRBuild ? INTERNAL_CHAT_ID : ALPHA_CHAT_ID, true, false);
+                }
+              });
+            }
+
+            if (build.publicChatId && (build.telegramTrack || isPRBuild)) {
+              const id = isPRBuild ? 'PR' : build.telegramTrack.startsWith('private') ? 'Private' : ucfirst(build.telegramTrack);
+              const targetChatId = (build.googlePlayTrack === 'production') ? ALPHA_CHAT_ID : build.publicChatId;
+              build.tasks.push({
+                name: 'publishTelegram' + id +
+                  (variant.name !== 'latest' ? ucfirst(variant.name) : '') +
+                  (build.googlePlayTrack === 'production' ? 'Draft' : ''),
+                needsAwait: true,
+                act: (task, callback) => {
+                  return publishToTelegram(bot, task, build, variant.name, callback, targetChatId, false, true, true);
+                }
+              });
             }
           });
 
@@ -3123,17 +3163,37 @@ function processPrivateCommand (botId, bot, msg, command, commandArgsRaw) {
             } else if (build.googlePlayTrack === 'production') {
               result += 'An update will be available for all users after passing the review process.\n';
             }
-            const variantLinks = [];
+            const variantLinks = {};
+            let variantLinksCount = 0;
             if (build.publicMessages) {
               for (let i = 0; i < build.publicMessages.length; i++) {
                 const publicMessage = build.publicMessages[i];
                 if (publicMessage.url) {
-                  variantLinks.push('<a href="' + publicMessage.url + '">' + publicMessage.abiVariant + (publicMessage.sdkVariant !== 'latest' ? ucfirst(publicMessage.sdkVariant) : '') + '</a>');
+                  const links = variantLinks[publicMessage.sdkVariant] || (variantLinks[publicMessage.sdkVariant] = []);
+                  links.push('<a href="' + publicMessage.url + '">' + publicMessage.abiVariant + '</a>');
+                  variantLinksCount++;
                 }
               }
             }
-            if (variantLinks.length) {
-              result += 'You can install <b>APKs</b> without waiting: ' + variantLinks.join(', ') + '.';
+            if (variantLinksCount > 0) {
+              for (const sdkVariant in variantLinks) {
+                const links = variantLinks[sdkVariant];
+                if (sdkVariant === 'latest') {
+                  result += 'You can install <b>APKs</b> without waiting.\n\n';
+                }
+                switch (sdkVariant) {
+                  case 'latest':
+                    result += 'Android 6.0+';
+                    break;
+                  case 'lollipop':
+                    result += 'Android 5.0–5.1 (Lollipop)';
+                    break;
+                  case 'legacy':
+                    result += 'Android 4.1–4.4 (Jelly Bean – KitKat)';
+                    break;
+                }
+                result += ': ' + links.join(',') + '.';
+              }
             } else if (build.googlePlayTrack === 'production') {
               result += '<b>APKs</b> will be published separately.';
             } else {
