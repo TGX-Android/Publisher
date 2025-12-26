@@ -2391,7 +2391,7 @@ function processPrivateCommand (botId, bot, msg, command, commandArgsRaw) {
 
         const allVariants = [
           {name: 'latest', abi: [ 'universal', 'arm64', 'arm32', 'x64', 'x86' ]},
-          {name: 'lollipop', abi: [ 'arm64', 'arm32', 'x64', 'x86' ]},
+          {name: 'lollipop', abi: [ 'universal', 'arm64', 'arm32', 'x64', 'x86' ]},
           {name: 'legacy', abi: [ 'arm32', 'x86' ]}
         ];
 
