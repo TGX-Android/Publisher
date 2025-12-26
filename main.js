@@ -2060,21 +2060,19 @@ function uploadToGithub (task, build, onDone, commandArgsRaw, isPrerelease, tagN
               build.version.name + (sdkFlavor !== 'latest' ? '-' + sdkFlavor : '') +
               (isPrerelease ? ' ' + build.githubTrack : '');
             let uploadResult = null;
-            let errorCount = 0;
-            do {
+            let attemptCount = 0;
+            while (!uploadResult && ++attemptCount <= 3) {
               try {
                 uploadResult = await uploadGitHubAsset(release, files.apkFile.path, apkFileName, apkLabel);
-                break;
               } catch (err) {
-                errorCount++;
-                if (errorCount > 3) {
+                if (attemptCount > 3) {
                   console.error('Upload GitHub asset failed...', err);
                 } else {
-                  console.error('Upload GitHub asset failed, retrying...', errorCount, err);
-                  await sleep(errorCount * 1000);
+                  console.error('Upload GitHub asset failed, retrying...', attemptCount, err);
+                  await sleep(attemptCount * 1000);
                 }
               }
-            } while (!uploadResult && errorCount <= 3)
+            }
             if (!uploadResult) {
               console.error('Upload GitHub asset failed, deleting release...');
               await deleteGitHubRelease(owner, repository, release.id);
