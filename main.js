@@ -119,6 +119,11 @@ const play = LOCAL ? null : google.androidpublisher({
 // CONSTANTS
 
 const ALL_PLATFORMS = ['googlePlay', 'huawei', 'github', 'telegram'];
+const GITHUB_BUILDS = {
+  'latest': ['universal'],
+  'lollipop': ['universal'],
+  'legacy': ['arm32']
+};
 
 // MAIN
 
@@ -962,7 +967,7 @@ function publishToTelegram (bot, task, build, sdkVariant, onDone, chatId, onlyPr
         parse_mode: 'HTML'
       };
       let ok =
-        (abiVariant !== 'universal' && abiVariant !== 'x86' && abiVariant !== 'x64') ||
+        (sdkVariant === 'latest' && abiVariant !== 'universal' && abiVariant !== 'x86' && abiVariant !== 'x64') ||
         (build.variants.length === 1 && build.variants[0].abi.length === 1);
       if (onlyPrivate) {
         ok = !ok;
@@ -2044,15 +2049,10 @@ function uploadToGithub (task, build, onDone, commandArgsRaw, isPrerelease, tagN
 
       console.log('Created GitHub release, uploading asset...');
 
-      const toPublish = {
-        'latest': ['universal'],
-        'lollipop': ['universal'],
-        'legacy': ['arm32']
-      };
       for (const sdkFlavor in build.files) {
         for (const abiFlavor in build.files[sdkFlavor]) {
           const files = build.files[sdkFlavor][abiFlavor];
-          if (files && toPublish[sdkFlavor] && toPublish[sdkFlavor].includes(abiFlavor)) {
+          if (files && GITHUB_BUILDS[sdkFlavor] && GITHUB_BUILDS[sdkFlavor].includes(abiFlavor)) {
             const apkFileName = settings.app.name.replace(/ /gi, '-') + '-' +
               build.version.name + (sdkFlavor !== 'latest' ? '-' + sdkFlavor : '') +
               (isPrerelease ? '-' + build.githubTrack : '') + '.apk';
@@ -2419,8 +2419,14 @@ function processPrivateCommand (botId, bot, msg, command, commandArgsRaw) {
             break;
           case 'pr':
           case 'huawei':
-          case 'github':
             selectedVariants = [{name: 'latest', abi: ['universal']}];
+            break;
+          case 'github':
+            selectedVariants = [];
+            for (const sdkVariant in GITHUB_BUILDS) {
+              const abi = GITHUB_BUILDS[sdkVariant];
+              selectedVariants.push({name: sdkVariant, abi});
+            }
             break;
           default: {
             allVariants.forEach((variant) => {
@@ -2972,7 +2978,7 @@ function processPrivateCommand (botId, bot, msg, command, commandArgsRaw) {
               });
             }
 
-            if (build.publicChatId && (build.telegramTrack || isPRBuild)) {
+            if (variant.name === 'latest' && build.publicChatId && (build.telegramTrack || isPRBuild)) {
               const id = isPRBuild ? 'PR' : build.telegramTrack.startsWith('private') ? 'Private' : ucfirst(build.telegramTrack);
               const targetChatId = (build.googlePlayTrack === 'production') ? ALPHA_CHAT_ID : build.publicChatId;
               build.tasks.push({
@@ -3176,12 +3182,9 @@ function processPrivateCommand (botId, bot, msg, command, commandArgsRaw) {
             if (variantLinksCount > 0) {
               for (const sdkVariant in variantLinks) {
                 const links = variantLinks[sdkVariant];
-                if (sdkVariant === 'latest') {
-                  result += 'You can install <b>APKs</b> without waiting.\n\n';
-                }
                 switch (sdkVariant) {
                   case 'latest':
-                    result += 'Android 6.0+';
+                    result += 'You can install <b>APKs</b> without waiting';
                     break;
                   case 'lollipop':
                     result += 'Android 5.0–5.1 (Lollipop)';
