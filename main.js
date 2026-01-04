@@ -2020,7 +2020,11 @@ function uploadToGithub (task, build, onDone, commandArgsRaw, isPrerelease, tagN
     variant.abi.forEach((abiVariant) => {
       const files = build.files[variant.name][abiVariant];
       changeLog += '\n\n---';
-      changeLog += '\n\n#### ' + getDisplayVariant(variant) + '\n';
+      changeLog += '\n\n#### ';
+      if (variant.name !== 'latest') {
+        changeLog += variant.name + '-';
+      }
+      changeLog += getDisplayVariant(abiVariant) + '\n';
       ['sha256', 'sha1', 'md5'].forEach((algorithm) => {
         const hash = files.apkFile.checksum[algorithm];
         if (hash) {
@@ -2978,7 +2982,7 @@ function processPrivateCommand (botId, bot, msg, command, commandArgsRaw) {
               });
             }
 
-            if (variant.name === 'latest' && build.publicChatId && (build.telegramTrack || isPRBuild)) {
+            if (build.publicChatId && (build.telegramTrack || isPRBuild)) {
               const id = isPRBuild ? 'PR' : build.telegramTrack.startsWith('private') ? 'Private' : ucfirst(build.telegramTrack);
               const targetChatId = (build.googlePlayTrack === 'production') ? ALPHA_CHAT_ID : build.publicChatId;
               build.tasks.push({
@@ -3180,20 +3184,32 @@ function processPrivateCommand (botId, bot, msg, command, commandArgsRaw) {
               }
             }
             if (variantLinksCount > 0) {
+              let legacyWarning = false;
               for (const sdkVariant in variantLinks) {
                 const links = variantLinks[sdkVariant];
+                if (!legacyWarning && sdkVariant !== 'latest' && variantLinks['latest']) {
+                  legacyWarning = true;
+                  result += '\n\n';
+                  result += 'If you\'re using an old Android version, wait for an update on Google Play, or use one of the special APKs below:\n'
+                }
                 switch (sdkVariant) {
                   case 'latest':
-                    result += 'You can install <b>APKs</b> without waiting';
+                    result += 'You can install the same <b>APKs</b> without waiting';
                     break;
                   case 'lollipop':
-                    result += 'Android 5.0–5.1 (Lollipop)';
+                    result += '\nAndroid 5.0–5.1 (Lollipop)';
                     break;
                   case 'legacy':
-                    result += 'Android 4.1–4.4 (Jelly Bean – KitKat)';
+                    result += '\nAndroid 4.1–4.4 (Jelly Bean – KitKat)';
                     break;
                 }
-                result += ': ' + links.join(',') + '.';
+                result += ': ';
+                if (sdkVariant === 'latest') {
+                  result += links.map((item) => '<b><u>' + item + '</u></b>').join(', ');
+                } else {
+                  result += links.join(', ');
+                }
+                result += '.';
               }
             } else if (build.googlePlayTrack === 'production') {
               result += '<b>APKs</b> will be published separately.';
