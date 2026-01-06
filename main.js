@@ -2510,7 +2510,7 @@ function processPrivateCommand (botId, bot, msg, command, commandArgsRaw) {
           let track = null;
           if (command === '/deploy_' + distributionPlatform) {
             track = 'production';
-          } else if (track !== 'huawei' && Array.isArray(supportedTracks) && supportedTracks.includes(buildType)) {
+          } else if (distributionPlatform !== 'huawei' && Array.isArray(supportedTracks) && supportedTracks.includes(buildType)) {
             track = buildType === 'stable' ? 'production' : buildType;
           }
           if (track) {
