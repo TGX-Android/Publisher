@@ -121,6 +121,7 @@ const play = LOCAL ? null : google.androidpublisher({
 const ALL_PLATFORMS = ['googlePlay', 'huawei', 'github', 'telegram'];
 const GITHUB_BUILDS = {
   'latest': ['universal'],
+  'marshmallow': ['universal'],
   'lollipop': ['universal'],
   'legacy': ['arm32']
 };
@@ -907,6 +908,10 @@ function getBuildCaption (build, sdkVariant, abiVariant, isPrivate, shortenCheck
   switch (sdkVariant) {
     case 'latest': {
       // caption += '\n\n<b>For Android 6 (Marshmallow) devices.'
+      break;
+    }
+    case 'marshmallow': {
+      caption += '\n<b>Supports</b>: Android Marshmallow only (<b>23</b>)'
       break;
     }
     case 'lollipop': {
@@ -1993,7 +1998,12 @@ function uploadToGithub (task, build, onDone, commandArgsRaw, isPrerelease, tagN
 
   changeLog += '<details><summary>Checksums for <code>' + versionName + '</code>. Tap to expand</summary>';
 
-  const allSdkFlavors = [ 'latest', 'lollipop', 'legacy' ];
+  const allSdkFlavors = [
+    'latest',
+    'marshmallow',
+    'lollipop',
+    'legacy'
+  ];
   const allAbiFlavors = ['universal', 'arm64', 'arm32', 'x64', 'x86'];
   const sortBy = (variants) => {
     return (a, b) => {
@@ -2343,6 +2353,11 @@ function processPrivateCommand (botId, bot, msg, command, commandArgsRaw) {
     case '/build_latestArm64':
     case '/build_latestX86':
     case '/build_latestX64':
+    case '/build_marshmallow':
+    case '/build_marshmallowArm32':
+    case '/build_marshmallowArm64':
+    case '/build_marshmallowX86':
+    case '/build_marshmallowX64':
     case '/build_lollipop':
     case '/build_lollipopArm32':
     case '/build_lollipopArm64':
@@ -2393,6 +2408,7 @@ function processPrivateCommand (botId, bot, msg, command, commandArgsRaw) {
 
         const allVariants = [
           {name: 'latest', abi: [ 'universal', 'arm64', 'arm32', 'x64', 'x86' ]},
+          {name: 'marshmallow', abi: [ 'universal', 'arm64', 'arm32', 'x64', 'x86' ]},
           {name: 'lollipop', abi: [ 'universal', 'arm64', 'arm32', 'x64', 'x86' ]},
           {name: 'legacy', abi: [ 'arm32', 'x86' ]}
         ];
@@ -2408,6 +2424,7 @@ function processPrivateCommand (botId, bot, msg, command, commandArgsRaw) {
             selectedVariants = allVariants;
             break;
           case 'latest':
+          case 'marshmallow':
           case 'lollipop':
           case 'legacy':
             selectedVariants = allVariants.filter((variant) =>
@@ -3195,6 +3212,9 @@ function processPrivateCommand (botId, bot, msg, command, commandArgsRaw) {
                 switch (sdkVariant) {
                   case 'latest':
                     result += 'You can install the same <b>APKs</b> without waiting';
+                    break;
+                  case 'marshmallow':
+                    result += '\nAndroid 6.0 (Marshmallow)';
                     break;
                   case 'lollipop':
                     result += '\nAndroid 5.0–5.1 (Lollipop)';
