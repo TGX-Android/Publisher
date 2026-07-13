@@ -2933,29 +2933,37 @@ function processPrivateCommand (botId, bot, msg, command, commandArgsRaw) {
             }
           };
           build.tasks.push(restorePullRequestsListTask);
-          build.variants.forEach((variant) => {
-            const variantsSuffix =
-              ucfirst(variant.name) +
-              variant.abi.map(ucfirst).join('+');
-            if (!skipBuild) {
-              const args = [];
+
+          if (!skipBuild) {
+            const args = [];
+            let totalBuildCount = 0;
+            build.variants.forEach((variant) => {
+              totalBuildCount += variant.abi.length;
               variant.abi.forEach((abi) => {
                 args.push('assemble' + ucfirst(variant.name) + ucfirst(abi) + 'Release');
               });
-              const buildTask = {
-                name: 'assemble' + variantsSuffix,
-                script: 'gradlew',
-                args: args.concat([
-                  LOCAL ? '--info' : '--quiet',
-                  '--stacktrace',
-                  '--console=plain',
-                  '--parallel',
-                  '--no-configuration-cache',
-                  '--max-workers=' + threadCount
-                ])
-              };
-              build.tasks.push(buildTask);
-            }
+            });
+            const firstVariant = build.variants[0];
+            const variantsSuffix = build.variants.length === 1 ?
+              ucfirst(firstVariant.name) +
+              firstVariant.abi.map(ucfirst).join('+') :
+              'All' + totalBuildCount;
+            const buildTask = {
+              name: 'assemble' + variantsSuffix,
+              script: 'gradlew',
+              args: args.concat([
+                LOCAL ? '--info' : '--quiet',
+                '--stacktrace',
+                '--console=plain',
+                '--parallel',
+                '--no-configuration-cache',
+                '--max-workers=' + threadCount
+              ])
+            };
+            build.tasks.push(buildTask);
+          }
+
+          build.variants.forEach((variant) => {
             variant.abi.forEach((abi) => {
               const variantSuffix = ucfirst(variant.name) + ucfirst(abi);
               build.tasks.push({
