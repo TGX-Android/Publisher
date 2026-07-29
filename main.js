@@ -1411,7 +1411,7 @@ function prepareForPublishing (task, build, onDone) {
   };
 }
 
-function uploadToGooglePlay (task, build, onDone) {
+function uploadToGooglePlay (task, build, draftOnly, onDone) {
   play.edits.insert().then((appEdit) => {
     console.log('Created an AppEdit', JSON.stringify(appEdit));
     const editId = appEdit.data.id;
@@ -1437,7 +1437,7 @@ function uploadToGooglePlay (task, build, onDone) {
           track: build.googlePlayTrack,
           releases: [{
             name: build.version.name + ' ' + build.googlePlayTrack,
-            status: build.googlePlayTrack === 'production' ? 'draft' : 'completed',
+            status: draftOnly ? 'draft' : 'completed',
             releaseNotes: build.releaseNotes,
             versionCodes: uploadedVersionCodes
           }]
@@ -3035,13 +3035,13 @@ function processPrivateCommand (botId, bot, msg, command, commandArgsRaw) {
             });
 
             if (build.googlePlayTrack) {
-              const draftOnly = build.googlePlayTrack === 'production';
+              const draftOnly = build.googlePlayTrack === 'production' || commandArgs.draft;
               const uploadTaskSuffix = ucfirst(build.googlePlayTrack) + (draftOnly ? 'Draft' : ''); 
               build.tasks.push({
                 name: 'publishGooglePlay' + uploadTaskSuffix,
                 isAsync: true,
                 act: (task, callback) => {
-                  return uploadToGooglePlay(task, build, callback);
+                  return uploadToGooglePlay(task, build, draftOnly, callback);
                 }
               });
             }
