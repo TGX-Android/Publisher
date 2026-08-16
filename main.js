@@ -1432,7 +1432,7 @@ function uploadToGooglePlay (task, build, draftOnly, onDone) {
       play.edits.tracks.update({
         editId: editId,
         track: build.googlePlayTrack,
-        // changesNotSentForReview: true,
+        changesNotSentForReview: true,
         requestBody: {
           track: build.googlePlayTrack,
           releases: [{
