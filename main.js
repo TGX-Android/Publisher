@@ -2935,7 +2935,7 @@ function processPrivateCommand (botId, bot, msg, command, commandArgsRaw) {
           };
           build.tasks.push(restorePullRequestsListTask);
 
-          if (!skipBuild) {
+          /*if (!skipBuild) {
             const args = [];
             let totalBuildCount = 0;
             build.variants.forEach((variant) => {
@@ -2959,11 +2959,35 @@ function processPrivateCommand (botId, bot, msg, command, commandArgsRaw) {
               ])
             };
             build.tasks.push(buildTask);
+          }*/
+
+          if (!skipBuild) {
+            build.tasks.push({
+              name: 'stopGradle',
+              script: 'gradlew',
+              args: [
+                '--stop'
+              ]
+            });
           }
 
           build.variants.forEach((variant) => {
             variant.abi.forEach((abi) => {
               const variantSuffix = ucfirst(variant.name) + ucfirst(abi);
+
+              if (!skipBuild) {
+                build.tasks.push({
+                  name: 'assemble' + variantSuffix,
+                  script: 'gradlew',
+                  args: [
+                    'assemble' + variantSuffix + 'Release',
+                    LOCAL ? '--info' : '--quiet',
+                    '--stacktrace',
+                    '--console=plain'
+                  ]
+                });
+              }
+
               build.tasks.push({
                 name: 'verify' + variantSuffix,
                 act: (task, callback) => {
@@ -3019,6 +3043,18 @@ function processPrivateCommand (botId, bot, msg, command, commandArgsRaw) {
               });
             }
           });
+
+          if (!skipBuild) {
+            build.tasks.push({
+              name: 'killGradle',
+              cmd: [
+                './gradlew --stop',
+                'sleep 3',
+                'pkill -f GradleDaemon 2>/dev/null',
+                'pkill -f KotlinCompileDaemon 2>/dev/null'
+              ].join('; ')
+            });
+          }
 
           if (!LOCAL && (build.googlePlayTrack || build.huaweiTrack || build.githubTrack)) {
             build.distributionPlatforms = ALL_PLATFORMS.filter((platform) =>
