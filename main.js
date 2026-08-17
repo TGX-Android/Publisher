@@ -2566,10 +2566,7 @@ function processPrivateCommand (botId, bot, msg, command, commandArgsRaw) {
             'clean',
             LOCAL ? '--info' : '--quiet',
             '--stacktrace',
-            '--console=plain',
-            '--parallel',
-            '--no-configuration-cache',
-            '--max-workers=' + threadCount
+            '--console=plain'
           ]
         };
         const refreshInfoTask = {
@@ -2958,10 +2955,7 @@ function processPrivateCommand (botId, bot, msg, command, commandArgsRaw) {
               args: args.concat([
                 LOCAL ? '--info' : '--quiet',
                 '--stacktrace',
-                '--console=plain',
-                '--parallel',
-                '--no-configuration-cache',
-                '--max-workers=' + threadCount
+                '--console=plain'
               ])
             };
             build.tasks.push(buildTask);
