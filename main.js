@@ -2630,19 +2630,23 @@ function processPrivateCommand (botId, bot, msg, command, commandArgsRaw) {
           script: 'scripts/force-clean.sh'
         };
         const currentBranch = commandArgs.branch || 'main';
+        const remote = commandArgs.remote || 'origin';
         const checkoutTask = {
           name: 'checkout' + (currentBranch !== 'main' ? 'Branch' : ''),
           description: 'checkout',
-          cmd: '(git reset -q --hard || true) && \
-               (git checkout -q -- . || true) && \
-               (git fetch origin -q || true) && \
-               git checkout -q ' + currentBranch + ' && \
-               git reset --hard -q origin/' + currentBranch + ' && \
-               git submodule deinit -q -f --all && \
-               git submodule update -q --init --recursive && \
-               git submodule foreach -q --recursive git reset -q --hard && \
-               git submodule foreach -q --recursive git checkout -q -- . && \
-               echo "Using commit $(git rev-parse --short HEAD) ($(git rev-parse --abbrev-ref HEAD)): $(git show -s --format=%s)"'
+          cmd: [
+            '(git reset -q --hard || true)',
+            '(git checkout -q -- . || true)',
+            `git remote get-url ${remote} > /dev/null`,
+            `git fetch ${remote} -q --prune`,
+            `git checkout -q -B ${currentBranch} ${remote}/${currentBranch}`,
+            `git reset --hard -q ${remote}/${currentBranch}`,
+            'git submodule deinit -q -f --all',
+            'git submodule sync -q --recursive',
+            'git submodule update -q --init --recursive',
+            `git submodule foreach -q --recursive 'git reset -q --hard && git checkout -q -- .'`,
+            'echo "Using commit $(git rev-parse --short HEAD) ($(git rev-parse --abbrev-ref HEAD)): $(git show -s --format=%s)"'
+          ].join(' && ')
         };
         const newFetchGithubDetailsTask = (pullRequestId) => {
           return {
