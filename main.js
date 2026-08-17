@@ -2969,6 +2969,16 @@ function processPrivateCommand (botId, bot, msg, command, commandArgsRaw) {
                 '--stop'
               ]
             });
+
+            const firstVariant = build.variants[0];
+            const lintSuffix = ucfirst(firstVariant.name) + ucfirst(firstVariant.abi[0]);
+            build.tasks.push({
+              name: 'lint' + lintSuffix,
+              script: 'gradlew',
+              args: [
+                'lint' + lintSuffix + 'Release'
+              ]
+            });
           }
 
           build.variants.forEach((variant) => {
