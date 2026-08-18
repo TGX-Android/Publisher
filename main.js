@@ -3212,7 +3212,7 @@ function processPrivateCommand (botId, bot, msg, command, commandArgsRaw) {
                 result += ' is canceling…';
               }
             } else if (build.endTime) {
-              result += ' <b>finished.</b>';
+              result += ' <b>done.</b>';
             } else {
               result += ' in progress…';
             }
@@ -3297,7 +3297,7 @@ function processPrivateCommand (botId, bot, msg, command, commandArgsRaw) {
                 result += '\n';
               result += '• <b>' + task.name + '</b>: ';
               if (task.finished) {
-                result += '<b>finished in ' + duration(task.startTime, task.endTime) + '</b>';
+                result += '<b>done in ' + duration(task.startTime, task.endTime) + '</b>';
               } else if (task.interrupted) {
                 result += task.endTime ? '<b>aborted in ' + duration(task.startTime, task.endTime) + '</b>' : 'aborting…';
               } else if (task.error) {
@@ -3329,7 +3329,7 @@ function processPrivateCommand (botId, bot, msg, command, commandArgsRaw) {
           const time = (build.endTime || build.estimateDuration) ? (build.endTime ? duration(build.startTime, build.endTime, true) : '~' + duration(0, Math.round(build.estimateDuration / 1000) * 1000, true)) : null;
           if (isPublic) {
             if (time) {
-              result += build.endTime ? '\n\n<i>Finished in <b>' + time + '</b></i>' : '\n\n<i>Finishing in ' + time + '</i>';
+              result += build.endTime ? '\n\n<i>Done in <b>' + time + '</b></i>' : '\n\n<i>Finishing in ' + time + '</i>';
             }
           } else {
             result += '\n\n<i>' + cpuSignature + '</i>';
@@ -3505,7 +3505,7 @@ function processPrivateCommand (botId, bot, msg, command, commandArgsRaw) {
               const onDone = (code) => {
                 if (task.endTime)
                   return;
-                console.log('Finished task ' + task.name + ' with code ' + code);
+                console.log('Done task ' + task.name + ' with code ' + code);
                 if (code != 0 && task.privateLog) {
                   console.log('Private task ' + task.name + ' log:\n' + task.privateLog.join('\n'));
                 }
