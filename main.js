@@ -3138,8 +3138,8 @@ function processPrivateCommand (botId, bot, msg, command, commandArgsRaw) {
               cmd: [
                 './gradlew --stop',
                 'sleep 3',
-                'pkill -f GradleDaemon 2>/dev/null',
-                'pkill -f KotlinCompileDaemon 2>/dev/null'
+                'pkill -f [K]otlin[C]ompile[D]aemon 2>/dev/null',
+                'true'
               ].join('; ')
             });
           }
@@ -3589,10 +3589,10 @@ function processPrivateCommand (botId, bot, msg, command, commandArgsRaw) {
                   build.updateMessage();
                 }
               };
-              const onDone = (code) => {
+              const onDone = (code, signal) => {
                 if (task.endTime)
                   return;
-                console.log('Done task ' + task.name + ' with code ' + code);
+                console.log('Done task ' + task.name + ' with code ' + code + ' signal ' + signal);
                 if (code != 0 && task.privateLog) {
                   console.log('Private task ' + task.name + ' log:\n' + task.privateLog.join('\n'));
                 }
