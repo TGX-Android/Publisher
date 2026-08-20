@@ -19,6 +19,7 @@ process.env.NTBA_FIX_319 = 1;
 process.env.NTBA_FIX_350 = 1;
 
 const MAX_TEXT_MESSAGE_LENGTH = 4096;
+const ELLIPSIS = '…';
 
 const fs = require('fs'),
       os = require('os'),
@@ -296,7 +297,7 @@ function limitMessageLength (html, maxCodePointCount) {
     return html;
   }
 
-  const ellipsis = '…';
+  const ellipsis = ELLIPSIS;
   const ellipsisSize = messageLength(ellipsis);
   let trimmedEnd = 0;
 
@@ -2639,6 +2640,7 @@ function processPrivateCommand (botId, bot, msg, command, commandArgsRaw) {
         build.tasks = [];
         const initTask = {
           name: 'init',
+          displayName: 'Gradle cleanup',
           script: 'gradlew',
           args: [
             'clean',
@@ -2649,6 +2651,7 @@ function processPrivateCommand (botId, bot, msg, command, commandArgsRaw) {
         };
         const refreshInfoTask = {
           name: 'refreshInfo',
+          displayName: 'Check local data',
           act: (task, callback) => {
             getGitData((newGitData) => {
               if (!newGitData) {
@@ -2693,6 +2696,7 @@ function processPrivateCommand (botId, bot, msg, command, commandArgsRaw) {
         };
         const buildDependenciesTask = {
           name: 'buildDependencies',
+          displayName: 'Build dependencies',
           silence: true,
           script: 'scripts/setup.sh',
           args: [
@@ -2701,6 +2705,7 @@ function processPrivateCommand (botId, bot, msg, command, commandArgsRaw) {
         };
         const resetTask = {
           name: 'reset',
+          displayName: 'Reset repository',
           silence: true,
           script: 'scripts/force-clean.sh'
         };
@@ -2708,6 +2713,7 @@ function processPrivateCommand (botId, bot, msg, command, commandArgsRaw) {
         const remote = commandArgs.remote || 'origin';
         const checkoutTask = {
           name: 'checkout' + (currentBranch !== 'main' ? 'Branch' : ''),
+          displayName: 'Fetch source code',
           description: 'checkout',
           cmd: [
             '(git reset -q --hard || true)',
@@ -2726,6 +2732,7 @@ function processPrivateCommand (botId, bot, msg, command, commandArgsRaw) {
         const newFetchGithubDetailsTask = (pullRequestId) => {
           return {
             name: 'fetchGithubDetails',
+            displayName: 'Get GitHub user info',
             act: (task, callback) => {
               const infoUrl = build.git.remoteUrl.replace(/(?<=(^https?:\/\/))github\.com(?=\/)/gi, 'api.github.com/repos') + '/pulls/' + pullRequestId;
               const url = new URL(infoUrl);
@@ -2767,6 +2774,7 @@ function processPrivateCommand (botId, bot, msg, command, commandArgsRaw) {
 
           const updateSettingsTask = {
             name: 'updateSettings',
+            displayName: 'Update local.properties',
             act: (task, callback) => {
               let marketUrls = '';
               if (settings.app.market_url) {
@@ -2881,6 +2889,7 @@ function processPrivateCommand (botId, bot, msg, command, commandArgsRaw) {
 
               const preparePrTask = {
                 name: 'fetchPr-' + pullRequestId + (pullRequest.commit ? ':' + pullRequest.commit : ''),
+                displayName: 'Fetch PR info',
                 description: 'fetch_pr',
                 cmd: '(git branch -D pr-' + pullRequestId + ' || true) && \
                       ' + (commandArgs.force ?
@@ -2938,6 +2947,7 @@ function processPrivateCommand (botId, bot, msg, command, commandArgsRaw) {
         if (!command.startsWith('/checkout') && !isSimpleCommand) {
           const restorePullRequestsListTask = {
             name: 'restorePullRequestsList',
+            displayName: 'Check included PRs',
             act: (task, callback) => {
               fs.readFile(settings.TGX_SOURCE_PATH + '/local.properties', 'utf-8',  (err, data) => {
                 if (err) {
@@ -3042,6 +3052,7 @@ function processPrivateCommand (botId, bot, msg, command, commandArgsRaw) {
           if (!skipBuild) {
             build.tasks.push({
               name: 'stopGradle',
+              displayName: 'Stop Gradle',
               script: 'gradlew',
               args: [
                 '--stop'
@@ -3052,6 +3063,7 @@ function processPrivateCommand (botId, bot, msg, command, commandArgsRaw) {
             const lintSuffix = ucfirst(firstVariant.name) + ucfirst(firstVariant.abi[0]);
             build.tasks.push({
               name: 'lint' + lintSuffix,
+              displayName: 'Check critical issues',
               script: 'gradlew',
               args: [
                 'lint' + lintSuffix + 'Release'
@@ -3062,10 +3074,12 @@ function processPrivateCommand (botId, bot, msg, command, commandArgsRaw) {
           build.variants.forEach((variant) => {
             variant.abi.forEach((abi) => {
               const variantSuffix = ucfirst(variant.name) + ucfirst(abi);
+              const variantPrefix = '[' + variant.name + ',' + abi + ']';
 
               if (!skipBuild) {
                 build.tasks.push({
                   name: 'assemble' + variantSuffix,
+                  displayName: variantPrefix + ' Assemble',
                   script: 'gradlew',
                   args: [
                     'assemble' + variantSuffix + 'Release',
@@ -3078,6 +3092,7 @@ function processPrivateCommand (botId, bot, msg, command, commandArgsRaw) {
 
               build.tasks.push({
                 name: 'verify' + variantSuffix,
+                displayName: variantPrefix + ' Verify',
                 act: (task, callback) => {
                   getBuildFiles(build, variant.name, abi, (files) => {
                     if (!build.aborted && files) {
@@ -3100,6 +3115,7 @@ function processPrivateCommand (botId, bot, msg, command, commandArgsRaw) {
               });
               build.tasks.push({
                 name: 'upload' + variantSuffix,
+                displayName: variantPrefix + ' Upload',
                 isAsync: true,
                 act: (task, callback) => {
                   return uploadToTelegram(bot, task, build, variant.name, abi, callback);
@@ -3110,6 +3126,7 @@ function processPrivateCommand (botId, bot, msg, command, commandArgsRaw) {
             if (variant.name === 'latest' && build.publicChatId && (build.telegramTrack || isPRBuild) && (build.variants.length > 1 || variant.abi.length > 1)) {
               build.tasks.push({
                 name: 'publishTelegramInternal',
+                displayName: 'Publish to Telegram (private)',
                 needsAwait: true,
                 act: (task, callback) => {
                   return publishToTelegram(bot, task, build, variant.name, callback, isPRBuild ? INTERNAL_CHAT_ID : ALPHA_CHAT_ID, true, false);
@@ -3124,6 +3141,7 @@ function processPrivateCommand (botId, bot, msg, command, commandArgsRaw) {
                 name: 'publishTelegram' + id +
                   (variant.name !== 'latest' ? ucfirst(variant.name) : '') +
                   (build.googlePlayTrack === 'production' ? 'Draft' : ''),
+                displayName: 'Publish to Telegram',
                 needsAwait: true,
                 act: (task, callback) => {
                   return publishToTelegram(bot, task, build, variant.name, callback, targetChatId, false, true, true);
@@ -3135,6 +3153,7 @@ function processPrivateCommand (botId, bot, msg, command, commandArgsRaw) {
           if (!skipBuild) {
             build.tasks.push({
               name: 'killGradle',
+              displayName: 'Memory cleanup',
               cmd: [
                 './gradlew --stop',
                 'sleep 3',
@@ -3150,6 +3169,7 @@ function processPrivateCommand (botId, bot, msg, command, commandArgsRaw) {
             );
             build.tasks.push({
               name: 'prepareForPublishing',
+              displayName: 'Prepare for publishing',
               needsAwait: true,
               act: (task, callback) => {
                 return prepareForPublishing(task, build, callback);
@@ -3161,6 +3181,7 @@ function processPrivateCommand (botId, bot, msg, command, commandArgsRaw) {
               const uploadTaskSuffix = ucfirst(build.googlePlayTrack) + (draftOnly ? 'Draft' : ''); 
               build.tasks.push({
                 name: 'publishGooglePlay' + uploadTaskSuffix,
+                displayName: 'Upload to Google Play',
                 isAsync: true,
                 act: (task, callback) => {
                   return uploadToGooglePlay(task, build, draftOnly, callback);
@@ -3173,6 +3194,7 @@ function processPrivateCommand (botId, bot, msg, command, commandArgsRaw) {
               const uploadTaskSuffix = (build.huaweiTrack !== 'production' ? ucfirst(build.huaweiTrack) : '') + (draftOnly ? 'Draft' : '');
               build.tasks.push({
                 name: 'publishHuaweiAppGallery' + uploadTaskSuffix,
+                displayName: 'Upload to AppGallery',
                 isAsync: true,
                 act: (task, callback) => {
                   return uploadToHuaweiAppGallery(task, build, callback, draftOnly);
@@ -3189,6 +3211,7 @@ function processPrivateCommand (botId, bot, msg, command, commandArgsRaw) {
               const tagName = 'v' + build.version.name + (isPrerelease ? '-' + build.githubTrack : '');
               const createTagTask = {
                 name: 'createTag',
+                displayName: 'Create git tag',
                 description: 'createTag',
                 cmd: 'git fetch && \
                       git tag -f ' + tagName + ' ' + build.git.commit.long + ' && \
@@ -3199,6 +3222,7 @@ function processPrivateCommand (botId, bot, msg, command, commandArgsRaw) {
               const uploadTaskSuffix = isPrerelease ? ucfirst(build.githubTrack) : '';
               build.tasks.push({
                 name: 'publishGithub' + uploadTaskSuffix,
+                displayName: 'Upload to GitHub',
                 act: (task, callback) => {
                   return uploadToGithub(task, build, callback, commandArgsRaw, isPrerelease, tagName, draftOnly);
                 }
@@ -3206,6 +3230,7 @@ function processPrivateCommand (botId, bot, msg, command, commandArgsRaw) {
 
               const cleanupTagsTask = {
                 name: 'cleanupTags',
+                displayName: 'Delete obsolete git tags',
                 description: 'cleanupTags',
                 cmd: '(git tag | grep "beta" | grep -v ' + tagName + ' | xargs -I% sh -c \'git tag -d % && git push origin :refs/tags/% && echo "Deleted tag %"\') && (git push origin --tags -f)'
               };
@@ -3219,6 +3244,7 @@ function processPrivateCommand (botId, bot, msg, command, commandArgsRaw) {
           case '/update_sdk': {
             build.tasks.push({
               name: 'updateSdk',
+              displayName: 'Update SDK',
               script: 'scripts/setup-sdk.sh'
             });
             break;
@@ -3226,6 +3252,7 @@ function processPrivateCommand (botId, bot, msg, command, commandArgsRaw) {
           case '/upgrade_tdlib': {
             build.tasks.push({
               name: 'upgradeTdlib',
+              displayName: 'Upgrade TDLib',
               script: 'tdlib/upgrade.sh',
               args: [
                 settings.github.username,
@@ -3238,12 +3265,14 @@ function processPrivateCommand (botId, bot, msg, command, commandArgsRaw) {
             build.tasks.push(resetTask);
             const checkoutVersionsTask = {
               name: 'checkoutVersion',
+              displayName: 'Fetch latest version',
               description: 'checkoutVersion',
               cmd: '(git fetch && git checkout -f origin/main version.properties)'
             };
             build.tasks.push(checkoutVersionsTask);
             build.tasks.push({
               name: 'bumpVersion',
+              displayName: 'Bump version code',
               script: 'scripts/version_bump.sh'
             });
             break;
@@ -3393,7 +3422,8 @@ function processPrivateCommand (botId, bot, msg, command, commandArgsRaw) {
               } else {
                 taskStatus = '';
               }
-              let taskName = needBold ? '<b>' + task.name + '</b>' : task.name;
+              const internalTaskName = task.displayName || task.name;
+              let taskName = needBold ? '<b>' + internalTaskName + '</b>' : internalTaskName;
               if (taskStatus.length > 0) {
                 result += '• ' + taskName + ': ' + taskStatus;
               } else {
