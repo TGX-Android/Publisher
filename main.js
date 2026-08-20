@@ -18,6 +18,8 @@
 process.env.NTBA_FIX_319 = 1;
 process.env.NTBA_FIX_350 = 1;
 
+const MAX_TEXT_MESSAGE_LENGTH = 4096;
+
 const fs = require('fs'),
       os = require('os'),
       crypto = require('crypto'),
@@ -286,6 +288,82 @@ function empty (obj) {
     }
   }
   return true;
+}
+
+function limitMessageLength (html, maxCodePointCount) {
+  const originalLength = messageLength(html);
+  if (originalLength <= maxCodePointCount) {
+    return html;
+  }
+
+  const ellipsis = '…';
+  const ellipsisSize = messageLength(ellipsis);
+  let trimmedEnd = 0;
+
+  let tag = null;
+  let index = 0;
+  let codePointCount = 0;
+  const openTags = [];
+
+  for (const codePoint of html) {
+    if (codePoint === '<' || codePoint === '>') {
+      const isTagOpen = (codePoint === '<');
+      if (isTagOpen) {
+        tag = { name: '', startIndex: index };
+      } else if (tag !== null) {
+        if (tag.isClose) {
+          const openTag = openTags.pop();
+          // TODO(?): check if tags match?
+          if (openTags.length === 0) {
+            if (codePointCount <= maxCodePointCount - ellipsisSize) {
+              trimmedEnd = index + codePoint.length;
+            } else {
+              break; // can't fit close tag.
+            }
+          }
+        } else if (tag.lastSymbol === '/') { /* <br /> */
+          if (openTags.length === 0) {
+            trimmedEnd = index + codePoint.length;
+          }
+        } else {
+          openTags.push(tag);
+        }
+        tag = null;
+      }
+    } else if (tag !== null) { /* inside < ... > */
+      if (tag.name.length === 0 && codePoint === '/') {
+        tag.isClose = true;
+      } else {
+        tag.name += codePoint;
+        tag.lastSymbol = codePoint;
+      }
+    } else {
+      if (openTags.length === 0) {
+        if (codePointCount + 1 <= maxCodePointCount - ellipsisSize) {
+          trimmedEnd = index + codePoint.length;
+        } else {
+          break; // can't fit more code points.
+        }
+      }
+      codePointCount++;
+    }
+    index += codePoint.length;
+  }
+
+  return html.substring(0, trimmedEnd) + ellipsis;
+}
+
+function messageLength (html) {
+  let codePointCount = 0;
+  let inTag = false;
+  for (const codePoint of html) {
+    if (codePoint === '<' || codePoint === '>') {
+      inTag = (codePoint === '<');
+    } else if (!inTag) {
+      codePointCount++;
+    }
+  }
+  return codePointCount;
 }
 
 async function getObject (type, id) {
@@ -2147,7 +2225,7 @@ function sendArray (bot, chatId, array, parseMode, delimiter) {
   let text = '';
   while (remaining > 0) {
     const item = array[array.length - remaining];
-    if (text.length + item.length + (text.length ? delimiter.length : 0) > 4000) {
+    if (text.length + item.length + (text.length ? delimiter.length : 0) > MAX_TEXT_MESSAGE_LENGTH) {
       bot.sendMessage(chatId, text, {parse_mode: parseMode}).catch(globalErrorHandler());
       text = item;
     } else {
@@ -3293,24 +3371,33 @@ function processPrivateCommand (botId, bot, msg, command, commandArgsRaw) {
           } else {
             for (let i = 0; i < build.tasks.length; i++) {
               let task = build.tasks[i];
+              let needBold = false;
               if (i > 0)
                 result += '\n';
-              result += '• <b>' + task.name + '</b>: ';
+              let taskStatus = '';
               if (task.finished) {
-                result += '<b>done in ' + duration(task.startTime, task.endTime) + '</b>';
+                taskStatus = '<b>' + duration(task.startTime, task.endTime) + '</b>';
               } else if (task.interrupted) {
-                result += task.endTime ? '<b>aborted in ' + duration(task.startTime, task.endTime) + '</b>' : 'aborting…';
+                taskStatus = task.endTime ? '<b>aborted in ' + duration(task.startTime, task.endTime) + '</b>' : 'aborting…';
               } else if (task.error) {
-                result += '<b>failed in ' + duration(task.startTime, task.endTime) + '!</b>';
+                taskStatus = '<b>failed in ' + duration(task.startTime, task.endTime) + '!</b>';
+                needBold = true;
               } else if (task.startTime) {
-                result += 'in progress…';
+                needBold = true;
+                taskStatus = 'in progress…';
                 if (task.progress) {
-                  result += ' <b>' + task.progress + '</b>';
+                  taskStatus += ' <b>' + task.progress + '</b>';
                 }
               } else if (build.aborted || build.error) {
-                result += '<i>canceled</i>';
+                taskStatus = ''; // '<i>canceled</i>';
               } else {
-                result += '<i>pending</i>';
+                taskStatus = '';
+              }
+              let taskName = needBold ? '<b>' + task.name + '</b>' : task.name;
+              if (taskStatus.length > 0) {
+                result += '• ' + taskName + ': ' + taskStatus;
+              } else {
+                result += '• ' + taskName;
               }
               const logs = isPublic ? task.publicLog : task.privateLog;
               if (logs) {
@@ -3338,11 +3425,11 @@ function processPrivateCommand (botId, bot, msg, command, commandArgsRaw) {
             }
           }
           result = result.trim();
-          if (result.length > 4000) {
+          if (messageLength(result) > MAX_TEXT_MESSAGE_LENGTH) {
             if (!shorten) {
               return build.asString(isPublic, true);
             }
-            result = result.substring(0, 3999) + '…';
+            result = limitMessageLength(result, MAX_TEXT_MESSAGE_LENGTH);
           }
           return result;
         };
