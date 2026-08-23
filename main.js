@@ -2567,6 +2567,10 @@ function processPrivateCommand (botId, bot, msg, command, commandArgsRaw) {
         const buildId = nextBuildId();
         const isSetup = '/checkout' === command;
 
+        const gradlewArgs = commandArgsList.filter((arg) =>
+          arg.startsWith('-D')
+        );
+
         const pullRequestsMetadata = !isSetup ? null : commandArgsList.filter((arg) =>
           arg.match(/^[0-9]+$/gi)
         ).map((prId) =>
@@ -2642,12 +2646,12 @@ function processPrivateCommand (botId, bot, msg, command, commandArgsRaw) {
           name: 'init',
           displayName: 'Gradle cleanup',
           script: 'gradlew',
-          args: [
+          args: gradlewArgs.concat([
             'clean',
             LOCAL ? '--info' : '--quiet',
             '--stacktrace',
             '--console=plain'
-          ]
+          ])
         };
         const refreshInfoTask = {
           name: 'refreshInfo',
@@ -2767,10 +2771,7 @@ function processPrivateCommand (botId, bot, msg, command, commandArgsRaw) {
         if (command === '/checkout') {
           let appId = commandArgs['app.id'] || settings.app.id;
           let appName = commandArgs['app.name'] || settings.app.name;
-          let extensionName = commandArgs['tgx.extension'] || false;
-          if (extensionName === 'none') {
-            extensionName = false;
-          }
+          const extensionName = (commandArgs['tgx.extension'] !== 'none' && commandArgs['tgx.extension']) || false;
 
           const updateSettingsTask = {
             name: 'updateSettings',
@@ -3054,9 +3055,9 @@ function processPrivateCommand (botId, bot, msg, command, commandArgsRaw) {
               name: 'stopGradle',
               displayName: 'Stop Gradle',
               script: 'gradlew',
-              args: [
+              args: gradlewArgs.concat([
                 '--stop'
-              ]
+              ])
             });
 
             const firstVariant = build.variants[0];
@@ -3065,9 +3066,9 @@ function processPrivateCommand (botId, bot, msg, command, commandArgsRaw) {
               name: 'lint' + lintSuffix,
               displayName: 'Check critical issues',
               script: 'gradlew',
-              args: [
+              args: gradlewArgs.concat([
                 'lint' + lintSuffix + 'Release'
-              ]
+              ])
             });
           }
 
@@ -3081,12 +3082,12 @@ function processPrivateCommand (botId, bot, msg, command, commandArgsRaw) {
                   name: 'assemble' + variantSuffix,
                   displayName: variantPrefix + ' Assemble',
                   script: 'gradlew',
-                  args: [
+                  args: gradlewArgs.concat([
                     'assemble' + variantSuffix + 'Release',
                     LOCAL ? '--info' : '--quiet',
                     '--stacktrace',
                     '--console=plain'
-                  ]
+                  ])
                 });
               }
 
