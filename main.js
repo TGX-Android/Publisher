@@ -2726,10 +2726,11 @@ function processPrivateCommand (botId, bot, msg, command, commandArgsRaw) {
             `git fetch ${remote} -q --prune`,
             `git checkout -q -B ${currentBranch} ${remote}/${currentBranch}`,
             `git reset --hard -q ${remote}/${currentBranch}`,
+            'git clean -fd',
             'git submodule deinit -q -f --all',
             'git submodule sync -q --recursive',
             'git submodule update -q --init --recursive',
-            `git submodule foreach -q --recursive 'git reset -q --hard && git checkout -q -- .'`,
+            `git submodule foreach -q --recursive 'git reset -q --hard && git checkout -q -- . && git clean -fd'`,
             'echo "Using commit $(git rev-parse --short HEAD) ($(git rev-parse --abbrev-ref HEAD)): $(git show -s --format=%s)"'
           ].join(' && ')
         };
