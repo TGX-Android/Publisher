@@ -1511,7 +1511,6 @@ function uploadToGooglePlay (task, build, draftOnly, onDone) {
       play.edits.tracks.update({
         editId: editId,
         track: build.googlePlayTrack,
-        changesNotSentForReview: true,
         requestBody: {
           track: build.googlePlayTrack,
           releases: [{
@@ -1522,18 +1521,32 @@ function uploadToGooglePlay (task, build, draftOnly, onDone) {
           }]
         }
       }).then((updatedTrack) => {
-        console.log('Successfully updated track', JSON.stringify(updatedTrack));
-        play.edits.commit({
-          editId: editId
-        }).then((appEdit) => {
+        const appSubmitted = (appEdit) => {
           console.log('Successfully commited google play changes', JSON.stringify(appEdit));
           tracePublishedGooglePlayBuild(build).then(() => {
             onDone(0);
           });
-        }).catch((e) => {
-          console.error('Failed to commit changes to google play', build.googlePlayTrack, e);
+        };
+        const appSubmitFailed = (e) => {
+          console.error('Failed to commit changes to Google Play', build.googlePlayTrack, e);
           onDone(1);
-        });
+        };
+        console.log('Successfully updated track', JSON.stringify(updatedTrack));
+        const editObj = {
+          editId: editId
+        };
+        if (draftOnly) {
+          editObj.changesNotSentForReview = true;
+        }
+        play.edits.commit(editObj)
+          .then(appSubmitted)
+          .catch(editObj.changesNotSentForReview ? appSubmitFailed : ((e) => {
+          console.error('Failed to commit changes to Google Play, retrying with changesNotSentForReview = true', build.googlePlayTrack, e);
+          play.edits.commit({
+            editId: editId,
+            changesNotSentForReview: true
+          }).then(appSubmitted).catch(appSubmitFailed);
+        }));
       }).catch((updatedTrackError) => {
         console.error('Failed to update track', build.googlePlayTrack, updatedTrackError);
         onDone(1);
