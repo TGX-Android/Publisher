@@ -961,7 +961,7 @@ function getFromToCommit (build, allowProduction) {
   return null;
 }
 
-function getBuildCaption (build, sdkVariant, abiVariant, isPrivate, shortenChecksums) {
+function getBuildCaption (build, sdkVariant, abiVariant, shortenChecksums) {
   const fromToCommit = getFromToCommit(build,
     build.googlePlayTrack && build.previousGooglePlayProductionBuild && build.previousGooglePlayBuild &&
     build.previousGooglePlayBuild.version.code < build.previousGooglePlayProductionBuild.version.code
@@ -1047,7 +1047,7 @@ function publishToTelegram (bot, task, build, sdkVariant, onDone, chatId, onlyPr
       const doc = {
         type: 'document',
         media: file_id,
-        caption: getBuildCaption(build, sdkVariant, abiVariant, false, shortenChecksums),
+        caption: getBuildCaption(build, sdkVariant, abiVariant, shortenChecksums),
         parse_mode: 'HTML'
       };
       let ok =
@@ -1188,7 +1188,7 @@ function uploadToTelegram (bot, task, build, sdkVariant, abiVariant, onDone) {
   attemptAction(maxUploadAttemptCount, (accept, reject) => {
     bot.sendDocument(build.serviceChatId, fs.createReadStream(files.apkFile.path), {
       reply_to_message_id: build.serviceMessageId,
-      caption: getBuildCaption(build, sdkVariant, abiVariant),
+      caption: getBuildCaption(build, sdkVariant, abiVariant, true),
       parse_mode: 'HTML'
     }, {
       contentType: APK_MIME_TYPE
@@ -3137,7 +3137,7 @@ function processPrivateCommand (botId, bot, msg, command, commandArgsRaw) {
                 displayName: 'Publish to Telegram (private)',
                 needsAwait: true,
                 act: (task, callback) => {
-                  return publishToTelegram(bot, task, build, variant.name, callback, isPRBuild ? INTERNAL_CHAT_ID : ALPHA_CHAT_ID, true, false);
+                  return publishToTelegram(bot, task, build, variant.name, callback, isPRBuild ? INTERNAL_CHAT_ID : ALPHA_CHAT_ID, true, true);
                 }
               });
             }
