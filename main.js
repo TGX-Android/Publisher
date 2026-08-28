@@ -2720,12 +2720,6 @@ function processPrivateCommand (botId, bot, msg, command, commandArgsRaw) {
             '--skip-sdk-setup'
           ]
         };
-        const resetTask = {
-          name: 'reset',
-          displayName: 'Reset repository',
-          silence: true,
-          script: 'scripts/force-clean.sh'
-        };
         const currentBranch = commandArgs.branch || 'main';
         const remote = commandArgs.remote || 'origin';
         const checkoutTask = {
@@ -2891,7 +2885,6 @@ function processPrivateCommand (botId, bot, msg, command, commandArgsRaw) {
             }
           }
 
-          build.tasks.push(resetTask);
           build.tasks.push(checkoutTask);
           if (build.pullRequestsMetadata) {
             if (LOCAL)
@@ -3277,7 +3270,6 @@ function processPrivateCommand (botId, bot, msg, command, commandArgsRaw) {
             break;
           }
           case '/bump': {
-            build.tasks.push(resetTask);
             const checkoutVersionsTask = {
               name: 'checkoutVersion',
               displayName: 'Fetch latest version',
