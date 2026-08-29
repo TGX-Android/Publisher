@@ -1475,10 +1475,10 @@ function prepareForPublishing (task, build, onDone) {
         return;
       }
       canUploadApk(variant.name, abiVariant, files.metadata.versionCode, build.distributionPlatforms).then((success) => {
-        if (success) {
+        if (success || build.forceUploadApk) {
           onVariantChecked();
         } else {
-          const msg = 'APK #' + build.version.name + ' was already published. Version bump required.';
+          const msg = 'APK #' + build.version.name + ' was already published to ' + build.distributionPlatform + '. Version bump required.';
           task.logPublicly(msg);
           console.error(msg);
           onDone(1);
@@ -2721,6 +2721,7 @@ function processPrivateCommand (botId, bot, msg, command, commandArgsRaw) {
             '--skip-sdk-setup'
           ]
         };
+        build.forceUploadApk = !!commandArgs.force;
         const currentBranch = commandArgs.branch || 'main';
         const remote = commandArgs.remote || 'origin';
         const checkoutTask = {
