@@ -986,21 +986,27 @@ function getBuildCaption (build, sdkVariant, abiVariant, shortenChecksums) {
 
   switch (sdkVariant) {
     case 'latest': {
-      // caption += '\n\n<b>For Android 6 (Marshmallow) devices.'
+      caption += '\n<b>Supports</b>: Android N+'
       break;
     }
     case 'marshmallow': {
-      caption += '\n<b>Supports</b>: Android Marshmallow only (<b>23</b>)'
+      caption += '\n<b>Supports</b>: Android Marshmallow only'
       break;
     }
     case 'lollipop': {
-      caption += '\n<b>Supports</b>: Android Lollipop only (<b>21–22</b>)'
+      caption += '\n<b>Supports</b>: Android Lollipop only'
       break;
     }
     case 'legacy': {
-      caption += '\n<b>Supports</b>: Android Jelly Bean & KitKat only (<b>16–20</b>)'
+      caption += '\n<b>Supports</b>: Android Jelly Bean & KitKat only'
       break;
     }
+  }
+
+  if (abiVariant === 'x86' || abiVariant == 'arm32') {
+    caption += ' (32-bit devices)';
+  } else if (abiVariant === 'arm64' || abiVariant === 'x64') {
+    caption += ' (64-bit devices)'
   }
 
   const checksumAlgorithms = ['md5', 'sha1', 'sha256'];
