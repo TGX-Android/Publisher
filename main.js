@@ -1541,13 +1541,13 @@ function uploadToGooglePlay (task, build, draftOnly, onDone) {
         play.edits.commit({
           editId: editId
         }).then(appSubmitted)
-          .catch(editObj.changesNotSentForReview ? appSubmitFailed : ((e) => {
+          .catch((e) => {
           console.error('Failed to commit changes to Google Play, retrying with changesNotSentForReview = true', build.googlePlayTrack, e);
           play.edits.commit({
             editId: editId,
             changesNotSentForReview: true
           }).then(appSubmitted).catch(appSubmitFailed);
-        }));
+        });
       }).catch((updatedTrackError) => {
         console.error('Failed to update track', build.googlePlayTrack, updatedTrackError);
         onDone(1);
