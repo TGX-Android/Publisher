@@ -3091,7 +3091,9 @@ function processPrivateCommand (botId, bot, msg, command, commandArgsRaw) {
                   name: 'assemble' + variantSuffix,
                   displayName: variantPrefix + ' Assemble',
                   script: 'gradlew',
-                  args: gradlewArgs.concat([
+                  args: gradlewArgs.concat(variant.name === 'legacy' ? [
+                    '-PuseLegacyNdk=true'
+                  ] : []).concat([
                     'assemble' + variantSuffix + 'Release',
                     LOCAL ? '--info' : '--quiet',
                     '--stacktrace',
