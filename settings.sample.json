@@ -30,7 +30,7 @@
     }
   },
   "youtube": {
-    "api_key": "YouTube api key"
+    "api_key": "<YouTube API key, e.g. from environment variable or secret manager>"
   },
   "huawei": {
     "app_id": "<AppGallery App ID>",
