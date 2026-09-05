@@ -607,6 +607,8 @@ function getAppVersion (callback) {
     } else {
       const buildVersion = parseInt(getProperty(data, 'version.app'));
       const creationDate = parseInt(getProperty(data, 'version.creation'));
+      const ndkPrimary = getProperty(data, 'version.ndk_primary');
+      const ndkLegacy = getProperty(data, 'version.ndk_legacy');
       if (!creationDate) {
         callback('#' + buildVersion);
         return;
@@ -616,7 +618,14 @@ function getAppVersion (callback) {
         const buildDate = new Date(commitDate * 1000);
         const fromDate = new Date(creationDate);
         const minorVersion = monthYears(buildDate, fromDate);
-        callback({code: buildVersion, name: majorVersion + '.' + minorVersion + '.' + buildVersion});
+        callback({
+          code: buildVersion,
+          name: majorVersion + '.' + minorVersion + '.' + buildVersion,
+          ndk: {
+            legacy: ndkLegacy,
+            primary: ndkPrimary
+          }
+        });
       });
     }    
   });
@@ -1175,7 +1184,10 @@ function uploadToTelegram (bot, task, build, sdkVariant, abiVariant, onDone) {
 
   const onApkUploaded = (apkMessage) => {
     files.apkFile.remote_id = apkMessage.document.file_id;
-    modifyNativeDebugSymbolsArchive(files.nativeDebugSymbolsFile.path).then((nativeDebugSymbolsPath) => {
+    modifyNativeDebugSymbolsArchive(
+      files.nativeDebugSymbolsFile.path,
+      build.version.ndk[sdkVariant === 'legacy' ? 'legacy' : 'primary']
+    ).then((nativeDebugSymbolsPath) => {
       attemptAction(maxUploadAttemptCount, (accept, reject) => {
         const nativeDebugSymbolsStream = fs.createReadStream(nativeDebugSymbolsPath);
         bot.sendDocument(build.serviceChatId, nativeDebugSymbolsStream, {
@@ -1280,13 +1292,15 @@ async function fetchAvailableLanguageCodes () {
   return ['en'];
 }
 
-async function modifyNativeDebugSymbolsArchive (filePath) {
+async function modifyNativeDebugSymbolsArchive (filePath, ndkVersion) {
   let allowExtraDebugSymbols = false;
 
   const tdlibPath = path.join(settings.TGX_SOURCE_PATH, 'tdlib');
-  const extraNativeDebugSymbolsPath = settings.TDLIB_SYMBOLS_PATH || path.join(tdlibPath, 'source', 'build', 'native-debug-symbols');
+  const extraNativeDebugSymbolsPath = settings.TDLIB_SYMBOLS_PATH ?
+    path.join(settings.TDLIB_SYMBOLS_PATH, ndkVersion, 'native-debug-symbols') :
+    path.join(tdlibPath, 'source', 'build', ndkVersion, 'native-debug-symbols');
   if (settings.add_tdlib_debug_symbols === true && fs.existsSync(extraNativeDebugSymbolsPath)) {
-    // Make sure tdlib/version.txt and tdlib/source/build/native-debug-symbols/version.txt match
+    // Make sure tdlib/version.txt and tdlib/source/build/$ndkVersion/native-debug-symbols/version.txt match
     const tdlibVersionPath = path.join(tdlibPath, 'version.txt');
     const extraNativeDebugSymbolsVersionPath = path.join(extraNativeDebugSymbolsPath, 'version.txt');
     if (fs.existsSync(tdlibVersionPath) && fs.existsSync(extraNativeDebugSymbolsVersionPath)) {
@@ -1580,7 +1594,10 @@ function uploadToGooglePlay (task, build, draftOnly, onDone) {
             return;
           }
           uploadedVersionCodes.push(uploadedApk.data.versionCode);
-          modifyNativeDebugSymbolsArchive(files.nativeDebugSymbolsFile.path).then((nativeDebugSymbolsPath) => {
+          modifyNativeDebugSymbolsArchive(
+            files.nativeDebugSymbolsFile.path,
+            build.version.ndk[variant.name === 'legacy' ? 'legacy' : 'primary']
+          ).then((nativeDebugSymbolsPath) => {
             attemptAction(5, (accept, reject) => {
               const nativeDebugSymbolsStream = fs.createReadStream(nativeDebugSymbolsPath);
               play.edits.deobfuscationfiles.upload({
