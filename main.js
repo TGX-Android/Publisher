@@ -1186,7 +1186,8 @@ function uploadToTelegram (bot, task, build, sdkVariant, abiVariant, onDone) {
     files.apkFile.remote_id = apkMessage.document.file_id;
     modifyNativeDebugSymbolsArchive(
       files.nativeDebugSymbolsFile.path,
-      build.version.ndk[sdkVariant === 'legacy' ? 'legacy' : 'primary']
+      build.version.ndk[sdkVariant === 'legacy' ? 'legacy' : 'primary'],
+      abiVariant
     ).then((nativeDebugSymbolsPath) => {
       attemptAction(maxUploadAttemptCount, (accept, reject) => {
         const nativeDebugSymbolsStream = fs.createReadStream(nativeDebugSymbolsPath);
@@ -1292,22 +1293,28 @@ async function fetchAvailableLanguageCodes () {
   return ['en'];
 }
 
-async function modifyNativeDebugSymbolsArchive (filePath, ndkVersion) {
+async function modifyNativeDebugSymbolsArchive (filePath, ndkVersion, abiVariant) {
   let allowExtraDebugSymbols = false;
 
   const tdlibPath = path.join(settings.TGX_SOURCE_PATH, 'tdlib');
   const extraNativeDebugSymbolsPath = settings.TDLIB_SYMBOLS_PATH ?
     path.join(settings.TDLIB_SYMBOLS_PATH, ndkVersion, 'native-debug-symbols') :
     path.join(tdlibPath, 'source', 'build', ndkVersion, 'native-debug-symbols');
-  if (settings.add_tdlib_debug_symbols === true && fs.existsSync(extraNativeDebugSymbolsPath)) {
-    // Make sure tdlib/version.txt and tdlib/source/build/$ndkVersion/native-debug-symbols/version.txt match
-    const tdlibVersionPath = path.join(tdlibPath, 'version.txt');
-    const extraNativeDebugSymbolsVersionPath = path.join(extraNativeDebugSymbolsPath, 'version.txt');
-    if (fs.existsSync(tdlibVersionPath) && fs.existsSync(extraNativeDebugSymbolsVersionPath)) {
-      const tdlibVersion = fs.readFileSync(tdlibVersionPath);
-      const extraNativeDebugSymbolsVersion = fs.readFileSync(extraNativeDebugSymbolsVersionPath);
-      allowExtraDebugSymbols = tdlibVersion.equals(extraNativeDebugSymbolsVersion);
-      console.log('TDLib and native-debug-symbols match:', allowExtraDebugSymbols);
+  if (settings.add_tdlib_debug_symbols === true) {
+    if (fs.existsSync(extraNativeDebugSymbolsPath)) {
+      // Make sure tdlib/version.txt and tdlib/source/build/$ndkVersion/native-debug-symbols/version.txt match
+      const tdlibVersionPath = path.join(tdlibPath, 'version.txt');
+      const extraNativeDebugSymbolsVersionPath = path.join(extraNativeDebugSymbolsPath, 'version.txt');
+      if (fs.existsSync(tdlibVersionPath) && fs.existsSync(extraNativeDebugSymbolsVersionPath)) {
+        const tdlibVersion = fs.readFileSync(tdlibVersionPath);
+        const extraNativeDebugSymbolsVersion = fs.readFileSync(extraNativeDebugSymbolsVersionPath);
+        allowExtraDebugSymbols = tdlibVersion.equals(extraNativeDebugSymbolsVersion);
+        console.log('TDLib and native-debug-symbols match:', allowExtraDebugSymbols);
+      } else {
+        console.log('Does not exist');
+      }
+    } else {
+      console.log('Does not exist [1]', extraNativeDebugSymbolsPath);
     }
   }
 
@@ -1316,76 +1323,67 @@ async function modifyNativeDebugSymbolsArchive (filePath, ndkVersion) {
     return filePath;
   }
 
-  const existingArchivePath = path.parse(filePath);
-  const temporaryExtractedDirPath = path.join(existingArchivePath.dir, existingArchivePath.name + '-unzipped-temp');
-  const modifiedArchivePath = path.join(existingArchivePath.dir, existingArchivePath.name + '-modified' + existingArchivePath.ext);
+  const abiFilter = [
+    'armeabi-v7a',
+    'arm64-v8a',
+    'x86',
+    'x86_64'
+  ].filter((abi) => {
+    switch (abiVariant) {
+      case 'universal': return true;
+      case 'arm64': return abi === 'arm64-v8a';
+      case 'arm32': return abi === 'armeabi-v7a';
+      case 'x86': return abi === 'x86';
+      case 'x64': return abi === 'x86_64';
+      default: {
+        console.error('Unknown abi variant:', abiVariant);
+        return true;
+      }
+    }
+  });
 
+  const existingArchivePath = path.parse(filePath);
+  const modifiedArchivePath = path.join(existingArchivePath.dir, existingArchivePath.name + '-modified' + existingArchivePath.ext);
   const existingZip = new AdmZip(filePath);
 
+  // Filter rudimentary abi
+  let removedCount = 0;
+  existingZip.getEntries()
+    .filter(e => !abiFilter.includes(e.entryName.split('/')[0]))
+    .forEach(e => {
+      existingZip.deleteFile(e);
+      removedCount++;
+    });
+
+  // Copy extra *.so.dbg files to native-debug-symbols-modified.zip
+  let addedCount = 0;
+  if (allowExtraDebugSymbols) {
+    abiFilter.forEach((abi) => {
+      const extraPath = path.join(extraNativeDebugSymbolsPath, abi);
+      if (fs.existsSync(extraPath) && fs.statSync(extraPath).isDirectory()) {
+        fs.readdirSync(extraPath).forEach((name) => {
+          const entryName = `${abi}/${name}`;
+          if (!existingZip.getEntry(entryName)) {
+            const extraSymbolsFile = path.join(extraPath, name);
+            existingZip.addLocalFile(extraSymbolsFile, abi);
+            addedCount++;
+          }
+        });
+      }
+    });
+  }
+
   if (fs.existsSync(modifiedArchivePath)) {
-    fs.unlinkSync(modifiedArchivePath)
+    fs.unlinkSync(modifiedArchivePath);
   }
-  if (fs.existsSync(temporaryExtractedDirPath)) {
-    fs.rmdirSync(temporaryExtractedDirPath, { recursive: true, force: true });
+  existingZip.writeZip(modifiedArchivePath);
+  
+  if (addedCount > 0 || removedCount > 0) {
+    console.log('Modified native-debug-symbols.zip, added:', addedCount, 'removed:', removedCount);
+    return modifiedArchivePath;
   }
 
-  existingZip.extractAllTo(temporaryExtractedDirPath, true);
-
-  if (fs.existsSync(temporaryExtractedDirPath)) {
-    let addedCount = 0;
-    if (allowExtraDebugSymbols) {
-      // Copy *.so.dbg related to TDLib to extracted directory
-      const copyFiles = (dirPath, relativeDirPath) => {
-        const files = fs.readdirSync(dirPath);
-        files.forEach((fileName) => {
-          const childFilePath = path.join(dirPath, fileName);
-          if (fs.statSync(childFilePath).isDirectory()) {
-            copyFiles(childFilePath, relativeDirPath ? path.join(relativeDirPath, fileName) : fileName);
-          } else if (fileName.match(/^.+\.so\.dbg$/g)) {
-            const toFilePath = relativeDirPath ?
-              path.join(temporaryExtractedDirPath, relativeDirPath, fileName) :
-              path.join(temporaryExtractedDirPath, fileName);
-            if (!fs.existsSync(toFilePath)) {
-              fs.copyFileSync(childFilePath, toFilePath);
-              addedCount++;
-            }
-          }
-        });
-      };
-      copyFiles(extraNativeDebugSymbolsPath);
-    }
-
-    let renamedCount = 0;
-    if (settings.modify_debug_symbols === true) {
-      // Rename *.so.dbg to just *.so
-      // DEPRECATED
-      /*const renameFiles = (dirPath) => {
-        const files = fs.readdirSync(dirPath);
-        files.forEach((fileName) => {
-          const childFilePath = path.join(dirPath, fileName);
-          if (fs.statSync(childFilePath).isDirectory()) {
-            renameFiles(childFilePath)
-          } else if (fileName.match(/^.+\.so\.dbg$/g)) {
-            const newFilePath = path.join(dirPath, fileName.substring(0, fileName.length - '.dbg'.length));
-            if (!fs.existsSync(newFilePath)) {
-              fs.copyFileSync(childFilePath, newFilePath);
-              renamedCount++;
-            }
-          }
-        });
-      };
-      renameFiles(temporaryExtractedDirPath);*/
-    }
-
-    if (renamedCount > 0 || addedCount > 0) {
-      const newZip = new AdmZip();
-      newZip.addLocalFolder(temporaryExtractedDirPath);
-      newZip.writeZip(modifiedArchivePath);
-      // fs.rmdirSync(temporaryExtractedDirPath, { recursive: true, force: true });
-      console.log('Modified native-debug-symbols.zip, added:', addedCount, 'renamed:', renamedCount);
-      return modifiedArchivePath;
-    }
-  }
+  fs.unlinkSync(modifiedArchivePath);
 
   console.log('Fallback to original native-debug-symbols.zip');
   return filePath;
@@ -1596,7 +1594,8 @@ function uploadToGooglePlay (task, build, draftOnly, onDone) {
           uploadedVersionCodes.push(uploadedApk.data.versionCode);
           modifyNativeDebugSymbolsArchive(
             files.nativeDebugSymbolsFile.path,
-            build.version.ndk[variant.name === 'legacy' ? 'legacy' : 'primary']
+            build.version.ndk[variant.name === 'legacy' ? 'legacy' : 'primary'],
+            abiVariant
           ).then((nativeDebugSymbolsPath) => {
             attemptAction(5, (accept, reject) => {
               const nativeDebugSymbolsStream = fs.createReadStream(nativeDebugSymbolsPath);
