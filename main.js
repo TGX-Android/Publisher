@@ -124,6 +124,8 @@ const play = LOCAL ? null : google.androidpublisher({
 const ALL_PLATFORMS = ['googlePlay', 'huawei', 'github', 'telegram'];
 const GITHUB_BUILDS = {
   'latest': ['universal'],
+  'qrs': ['universal'],
+  'tens': ['universal'],
   'marshmallow': ['universal'],
   'lollipop': ['universal'],
   'legacy': ['arm32']
@@ -995,7 +997,15 @@ function getBuildCaption (build, sdkVariant, abiVariant, shortenChecksums) {
 
   switch (sdkVariant) {
     case 'latest': {
-      caption += '\n<b>Supports</b>: Android N+'
+      caption += '\n<b>Supports</b>: Android 13+'
+      break;
+    }
+    case 'qrs': {
+      caption += '\n<b>Supports</b>: Android 10-12 only'
+      break;
+    }
+    case 'tens': {
+      caption += '\n<b>Supports</b>: Android 7.0-9.0 only (Nougat, Oreo, Pie)'
       break;
     }
     case 'marshmallow': {
@@ -2109,6 +2119,8 @@ function uploadToGithub (task, build, onDone, commandArgsRaw, isPrerelease, tagN
 
   const allSdkFlavors = [
     'latest',
+    'qrs',
+    'tens',
     'marshmallow',
     'lollipop',
     'legacy'
@@ -2457,24 +2469,41 @@ function processPrivateCommand (botId, bot, msg, command, commandArgsRaw) {
     case '/build_arm64':
     case '/build_x86':
     case '/build_x64':
+
     case '/build_latest':
     case '/build_latestArm32':
     case '/build_latestArm64':
     case '/build_latestX86':
     case '/build_latestX64':
+
+    case '/build_qrs':
+    case '/build_qrsArm32':
+    case '/build_qrsArm64':
+    case '/build_qrsX86':
+    case '/build_qrsX64':
+
+    case '/build_tens':
+    case '/build_tensArm32':
+    case '/build_tensArm64':
+    case '/build_tensX86':
+    case '/build_tensX64':
+
     case '/build_marshmallow':
     case '/build_marshmallowArm32':
     case '/build_marshmallowArm64':
     case '/build_marshmallowX86':
     case '/build_marshmallowX64':
+
     case '/build_lollipop':
     case '/build_lollipopArm32':
     case '/build_lollipopArm64':
     case '/build_lollipopX86':
     case '/build_lollipopX64':
+
     case '/build_legacy':
     case '/build_legacyArm32':
     case '/build_legacyX86':
+
     case '/build_huawei':
     case '/build_universal':
 
@@ -2517,6 +2546,8 @@ function processPrivateCommand (botId, bot, msg, command, commandArgsRaw) {
 
         const allVariants = [
           {name: 'latest', abi: [ 'universal', 'arm64', 'arm32', 'x64', 'x86' ]},
+          {name: 'qrs', abi: [ 'universal', 'arm64', 'arm32', 'x64', 'x86' ]},
+          {name: 'tens', abi: [ 'universal', 'arm64', 'arm32', 'x64', 'x86' ]},
           {name: 'marshmallow', abi: [ 'universal', 'arm64', 'arm32', 'x64', 'x86' ]},
           {name: 'lollipop', abi: [ 'universal', 'arm64', 'arm32', 'x64', 'x86' ]},
           {name: 'legacy', abi: [ 'arm32', 'x86' ]}
@@ -2533,6 +2564,8 @@ function processPrivateCommand (botId, bot, msg, command, commandArgsRaw) {
             selectedVariants = allVariants;
             break;
           case 'latest':
+          case 'qrs':
+          case 'tens':
           case 'marshmallow':
           case 'lollipop':
           case 'legacy':
@@ -3398,6 +3431,12 @@ function processPrivateCommand (botId, bot, msg, command, commandArgsRaw) {
                 switch (sdkVariant) {
                   case 'latest':
                     result += 'You can install the same <b>APKs</b> without waiting';
+                    break;
+                  case 'qrs':
+                    result += '\nAndroid 10-12';
+                    break;
+                  case 'tens':
+                    result += '\nAndroid 7.0–9.0 (Nougat, Oreo, Pie)';
                     break;
                   case 'marshmallow':
                     result += '\nAndroid 6.0 (Marshmallow)';
