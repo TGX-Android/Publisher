@@ -53,6 +53,7 @@ function checkPath (path) {
 
 const LOCAL = process.env.TGX_PRODUCTION !== '1';
 const settings = JSON.parse(fs.readFileSync(path.join(__dirname, 'settings.json'), 'UTF-8'));
+const CHECKOUT_SCRIPT_PATH = path.join(__dirname, 'scripts', 'git-checkout.sh');
 if (!settings.app.id || !settings.app.id.match(/^(?!\.)[a-z0-9._]+(?!\.)$/))
   throw Error('app.id is not specified in settings.json or not valid: ' + settings.app.id);
 
@@ -2777,20 +2778,11 @@ function processPrivateCommand (botId, bot, msg, command, commandArgsRaw) {
           name: 'checkout' + (currentBranch !== 'main' ? 'Branch' : ''),
           displayName: 'Fetch source code',
           description: 'checkout',
-          cmd: [
-            '(git reset -q --hard || true)',
-            '(git checkout -q -- . || true)',
-            `git remote get-url ${remote} > /dev/null`,
-            `git fetch ${remote} -q --prune`,
-            `git checkout -q -B ${currentBranch} ${remote}/${currentBranch}`,
-            `git reset --hard -q ${remote}/${currentBranch}`,
-            'git clean -ffd',
-            'git submodule deinit -q -f --all',
-            'git submodule sync -q --recursive',
-            'git submodule update -q --init --recursive',
-            `git submodule foreach -q --recursive 'git reset -q --hard && git checkout -q -- . && git clean -ffd'`,
-            'echo "Using commit $(git rev-parse --short HEAD) ($(git rev-parse --abbrev-ref HEAD)): $(git show -s --format=%s)"'
-          ].join(' && ')
+          script: CHECKOUT_SCRIPT_PATH,
+          args: [
+            remote,
+            currentBranch
+          ]
         };
         const newFetchGithubDetailsTask = (pullRequestId) => {
           return {
