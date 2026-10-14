@@ -439,6 +439,56 @@ function gitPull (callback) {
   });
 }
 
+async function updatePublisher () {
+  const run = (command) => new Promise((resolve, reject) => {
+    exec(command, {cwd: __dirname}, (error, stdout, stderr) => {
+      if (error) {
+        reject(new Error((stderr || error.message).trim()));
+      } else {
+        resolve(stdout.trim());
+      }
+    });
+  });
+  const short = (commit) => '<code>' + commit.substring(0, 7) + '</code>';
+
+  await run('git fetch -q --no-tags');
+  const [oldCommit, newCommit] = (await run('git rev-parse HEAD @{upstream}')).split('\n');
+  if (oldCommit === newCommit) {
+    return {restart: false, text: 'Already up to date: ' + short(oldCommit)};
+  }
+
+  const untracked = (await run('git status --porcelain --ignored -z')).split('\0')
+    .filter((entry) => entry.startsWith('?? ') || entry.startsWith('!! '))
+    .map((entry) => entry.substring(3).replace(/\/$/, ''));
+  const conflicts = (await run(`git diff --name-only --no-renames --diff-filter=A -z ${oldCommit} ${newCommit}`)).split('\0')
+    .filter((file) => untracked.some((entry) => file === entry || file.startsWith(entry + '/') || entry.startsWith(file + '/')));
+  if (conflicts.length) {
+    return {restart: false, text: 'Update refused: ' + short(newCommit) + ' would overwrite untracked files:\n<pre>' + escapeHtml(conflicts.join('\n')) + '</pre>'};
+  }
+  try {
+    await run(`git show ${newCommit}:main.js | "${process.execPath}" --check -`);
+  } catch (error) {
+    return {restart: false, text: 'Update refused: main.js at ' + short(newCommit) + ' does not compile:\n<pre>' + escapeHtml(error.message.split('\n    at ')[0]) + '</pre>'};
+  }
+
+  const newCommits = await run(`git log --max-count=20 --format="%h %s" ${oldCommit}..${newCommit}`);
+  const droppedCommits = await run(`git log --max-count=20 --format="%h %s" ${newCommit}..${oldCommit}`);
+  const localChanges = await run('git status --porcelain --untracked-files=no');
+  await run(`git reset -q --hard ${newCommit}`);
+
+  let text = 'Updated ' + short(oldCommit) + ' → ' + short(newCommit);
+  if (newCommits) {
+    text += ':\n<pre>' + escapeHtml(newCommits) + '</pre>';
+  }
+  if (droppedCommits) {
+    text += '\nDropped commits:\n<pre>' + escapeHtml(droppedCommits) + '</pre>';
+  }
+  if (localChanges) {
+    text += '\nDiscarded local changes:\n<pre>' + escapeHtml(localChanges) + '</pre>';
+  }
+  return {restart: true, text: text + '\nRestarting…'};
+}
+
 function getGitData (callback) {
   exec('echo "$(git rev-parse --short HEAD) $(git rev-parse HEAD) $(git show -s --format=%ct) $(git config --get remote.origin.url) $(git rev-parse --abbrev-ref HEAD) $(git log -1 --pretty=format:\'%an\')"', {cwd: settings.TGX_SOURCE_PATH}, (error, stdout, stderr) => {
     if (error) {
@@ -2445,6 +2495,21 @@ function processPrivateCommand (botId, bot, msg, command, commandArgsRaw) {
         } else {
           bot.sendMessage(msg.chat.id, 'No local changes found!').catch(globalErrorHandler());
         }
+      });
+      break;
+    }
+    case '/update': {
+      if (cur.pending_build) {
+        bot.sendMessage(msg.chat.id, 'Cannot update, as some build is in progress. Use /abort to cancel it.').catch(globalErrorHandler());
+        break;
+      }
+      updatePublisher().then((result) => {
+        const sent = bot.sendMessage(msg.chat.id, result.text, {parse_mode: 'HTML'}).catch(globalErrorHandler());
+        if (result.restart) {
+          sent.finally(() => process.kill(process.pid, 'SIGTERM'));
+        }
+      }, (error) => {
+        bot.sendMessage(msg.chat.id, 'Update failed:\n<pre>' + escapeHtml(error.message) + '</pre>', {parse_mode: 'HTML'}).catch(globalErrorHandler());
       });
       break;
     }
