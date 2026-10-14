@@ -2774,13 +2774,14 @@ function processPrivateCommand (botId, bot, msg, command, commandArgsRaw) {
         const initTask = {
           name: 'init',
           displayName: 'Gradle cleanup',
-          script: 'gradlew',
-          args: gradlewArgs.concat([
-            'clean',
-            LOCAL ? '--info' : '--quiet',
-            '--stacktrace',
-            '--console=plain'
-          ])
+          act: (task, callback) => {
+            fs.rm(path.join(settings.TGX_SOURCE_PATH, 'app', 'build', 'outputs'), {recursive: true, force: true}, (error) => {
+              if (error) {
+                task.logPrivately('Cannot remove app/build/outputs: ' + error.message);
+              }
+              callback(error ? 1 : 0);
+            });
+          }
         };
         const refreshInfoTask = {
           name: 'refreshInfo',
