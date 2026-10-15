@@ -2753,6 +2753,7 @@ function processPrivateCommand (botId, bot, msg, command, commandArgsRaw) {
         if (outputChatId !== build.serviceChatId) {
           build.publicChatId = outputChatId;
         }
+        const telegramChatId = buildType === 'beta' ? BETA_CHAT_ID : build.publicChatId;
         cur.pending_build = build;
         if (build.googlePlayTrack) {
           build.telegramTrack = build.googlePlayTrack;
@@ -3242,7 +3243,7 @@ function processPrivateCommand (botId, bot, msg, command, commandArgsRaw) {
               });
             });
 
-            if (variant.name === 'latest' && build.publicChatId && (build.telegramTrack || isPRBuild) && (build.variants.length > 1 || variant.abi.length > 1)) {
+            if (variant.name === 'latest' && telegramChatId && (build.telegramTrack || isPRBuild) && (build.variants.length > 1 || variant.abi.length > 1)) {
               build.tasks.push({
                 name: 'publishTelegramInternal',
                 displayName: 'Publish to Telegram (private)',
@@ -3253,9 +3254,9 @@ function processPrivateCommand (botId, bot, msg, command, commandArgsRaw) {
               });
             }
 
-            if (build.publicChatId && (build.telegramTrack || isPRBuild)) {
+            if (telegramChatId && (build.telegramTrack || isPRBuild)) {
               const id = isPRBuild ? 'PR' : build.telegramTrack.startsWith('private') ? 'Private' : ucfirst(build.telegramTrack);
-              const targetChatId = (build.googlePlayTrack === 'production') ? ALPHA_CHAT_ID : build.publicChatId;
+              const targetChatId = (build.googlePlayTrack === 'production') ? ALPHA_CHAT_ID : telegramChatId;
               build.tasks.push({
                 name: 'publishTelegram' + id +
                   (variant.name !== 'latest' ? ucfirst(variant.name) : '') +
@@ -3669,7 +3670,7 @@ function processPrivateCommand (botId, bot, msg, command, commandArgsRaw) {
             for (let i = 0; i < build.publicMessages.length; i++) {
               const messageId = build.publicMessages[i].message_id;
               if (messageId != 0) {
-                await bot.deleteMessage(build.publicChatId, messageId);
+                await bot.deleteMessage(telegramChatId, messageId);
                 build.publicMessages[i] = 0;
               }
             }
@@ -3818,6 +3819,18 @@ function processPrivateCommand (botId, bot, msg, command, commandArgsRaw) {
                 await bot.pinChatMessage(build.publicChatId, build.publicMessageId);
               } catch (e) {
                 console.log('Cannot pin chat message', e);
+              }
+            } else if (telegramChatId && !build.publicChatId && !(build.aborted || build.error || isPRBuild)) {
+              // Live progress may intentionally stay private. Publish only the
+              // completed build summary after all public artifacts are ready.
+              try {
+                const message = await bot.sendMessage(telegramChatId, build.asString(true), {
+                  parse_mode: 'HTML',
+                  disable_web_page_preview: true
+                });
+                await bot.pinChatMessage(telegramChatId, message.message_id);
+              } catch (e) {
+                console.log('Cannot publish final build message', e);
               }
             }
           });
