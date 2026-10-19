@@ -3369,6 +3369,21 @@ function processPrivateCommand (botId, bot, msg, command, commandArgsRaw) {
             break;
           }
           case '/upgrade_tdlib': {
+            const tdlibPath = path.join(settings.TGX_SOURCE_PATH, 'tdlib');
+            build.tasks.push({
+              name: 'checkoutTdlib',
+              displayName: 'Fetch TDLib',
+              script: CHECKOUT_SCRIPT_PATH,
+              args: ['origin', 'main'],
+              cwd: tdlibPath
+            });
+            build.tasks.push({
+              name: 'checkoutTd',
+              displayName: 'Fetch latest tdlib/td',
+              script: CHECKOUT_SCRIPT_PATH,
+              args: ['origin', 'master'],
+              cwd: path.join(tdlibPath, 'source', 'td')
+            });
             build.tasks.push({
               name: 'upgradeTdlib',
               displayName: 'Upgrade TDLib',
@@ -3766,11 +3781,11 @@ function processPrivateCommand (botId, bot, msg, command, commandArgsRaw) {
                 if (task.script) {
                   const args = task.args ? [task.script, ...task.args] : [task.script];
                   console.log('Running script', task.script);
-                  task.process = spawn('/bin/bash', args, {cwd: settings.TGX_SOURCE_PATH});
+                  task.process = spawn('/bin/bash', args, {cwd: task.cwd || settings.TGX_SOURCE_PATH});
                 } else {
                   const command = task.cmd + (task.args ? ' ' + task.args.join(' ') : '');
                   console.log('Executing bash -c', task.description || '...');
-                  task.process = spawn('/bin/bash', ['-c', command], {cwd: settings.TGX_SOURCE_PATH});
+                  task.process = spawn('/bin/bash', ['-c', command], {cwd: task.cwd || settings.TGX_SOURCE_PATH});
                 }
                 task.process.stdout.on('data', (data) => {
                   if (!task.silence || LOCAL) {
