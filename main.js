@@ -862,6 +862,17 @@ function getDisplayVariant (variant) {
   }
 }
 
+// ABI filter of single-ABI APK, null for APKs with multiple ABIs (arm, intel, universal)
+function toAbiFilter (abiVariant) {
+  switch (abiVariant) {
+    case 'arm64': return 'arm64-v8a';
+    case 'arm32': return 'armeabi-v7a';
+    case 'x64': return 'x86_64';
+    case 'x86': return 'x86';
+    default: return null;
+  }
+}
+
 function getBuildFiles (build, sdkVariant, abiVariant, callback) {
   const outputsDir = path.join(settings.TGX_SOURCE_PATH, 'app', 'build', 'outputs');
 
@@ -875,11 +886,17 @@ function getBuildFiles (build, sdkVariant, abiVariant, callback) {
 
   (async () => {
     const metadata = JSON.parse(await fs.promises.readFile(path.join(apkDir, 'output-metadata.json'), 'utf-8'));
-    // Each -Pabi build produces a single APK
-    const element = metadata.elements && metadata.elements.length === 1 ? metadata.elements[0] : null;
+    // Split APK has an ABI filter, the only APK of -Pabi build has none
+    const abiFilter = toAbiFilter(abiVariant);
+    const findAbi = (element) => (element.filters || []).find((filter) => filter.filterType === 'ABI');
+    const element = (metadata.elements || []).find((element) => {
+      const abi = findAbi(element);
+      return abi ? abi.value === abiFilter : metadata.elements.length === 1;
+    });
     if (!element || !element.versionCode) {
       throw new Error('Unexpected output-metadata.json: ' + JSON.stringify(metadata));
     }
+    const isSplit = !!findAbi(element);
 
     await fs.promises.rm(targetDir, {recursive: true, force: true});
     await fs.promises.mkdir(targetDir, {recursive: true});
@@ -901,7 +918,16 @@ function getBuildFiles (build, sdkVariant, abiVariant, callback) {
     let targetNativeDebugSymbolsFile = null;
     if (fs.existsSync(nativeDebugSymbolsFile)) {
       targetNativeDebugSymbolsFile = {path: path.join(targetDir, 'native-debug-symbols.zip')};
-      await fs.promises.copyFile(nativeDebugSymbolsFile, targetNativeDebugSymbolsFile.path);
+      if (isSplit) {
+        // Split APKs share one archive with all ABIs, keep only symbols of this APK
+        const zip = new AdmZip(nativeDebugSymbolsFile);
+        zip.getEntries()
+          .filter((entry) => entry.entryName.split('/')[0] !== abiFilter)
+          .forEach((entry) => zip.deleteFile(entry));
+        zip.writeZip(targetNativeDebugSymbolsFile.path);
+      } else {
+        await fs.promises.copyFile(nativeDebugSymbolsFile, targetNativeDebugSymbolsFile.path);
+      }
     }
 
     return {
@@ -3151,22 +3177,29 @@ function processPrivateCommand (botId, bot, msg, command, commandArgsRaw) {
           }
 
           build.variants.forEach((variant) => {
+            // Single-ABI APKs are built by one Gradle run via ABI splits
+            const splitAbis = variant.abi.filter((abi) => toAbiFilter(abi) !== null);
+            const useSplits = splitAbis.length > 1;
+
             variant.abi.forEach((abi) => {
               const variantSuffix = ucfirst(variant.name) + ucfirst(abi);
               const variantPrefix = '[' + variant.name + ',' + abi + ']';
 
-              if (!skipBuild) {
+              const isSplit = useSplits && splitAbis.includes(abi);
+              if (!skipBuild && (!isSplit || abi === splitAbis[0])) {
                 build.tasks.push({
-                  name: 'assemble' + variantSuffix,
-                  displayName: variantPrefix + ' Assemble',
+                  name: 'assemble' + (isSplit ? ucfirst(variant.name) + splitAbis.map(ucfirst).join('') : variantSuffix),
+                  displayName: (isSplit ? '[' + variant.name + ',' + splitAbis.join('+') + ']' : variantPrefix) + ' Assemble',
                   script: 'gradlew',
                   args: gradlewArgs.concat(variant.name === 'legacy' ? [
                     '-PuseLegacyNdk=true'
                   ] : []).concat(abi === 'arm' ? [
                     '-PuseLegacyPackaging=true'
                   ] : []).concat([
-                    'assemble' + ucfirst(variant.name) + 'Release',
-                    '-Pabi=' + abi,
+                    'assemble' + ucfirst(variant.name) + 'Release'
+                  ]).concat(isSplit ? [] : [
+                    '-Pabi=' + abi
+                  ]).concat([
                     LOCAL ? '--info' : '--quiet',
                     '--stacktrace',
                     '--console=plain'
