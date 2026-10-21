@@ -124,11 +124,11 @@ const play = LOCAL ? null : google.androidpublisher({
 
 const ALL_PLATFORMS = ['googlePlay', 'huawei', 'github', 'telegram'];
 const GITHUB_BUILDS = {
-  'latest': ['universal'],
-  'qrs': ['universal'],
-  'tens': ['universal'],
-  'marshmallow': ['universal'],
-  'lollipop': ['universal'],
+  'latest': ['arm'],
+  'qrs': ['arm'],
+  'tens': ['arm'],
+  'marshmallow': ['arm'],
+  'lollipop': ['arm'],
   'legacy': ['arm32']
 };
 
@@ -778,10 +778,10 @@ async function canUploadApk (sdkVariant, abiVariant, versionCode, platforms) {
   for (let i = 0; i < platforms.length; i++) {
     const platform = platforms[i];
     const isDefault = platform === 'googlePlay';
-    const max = type === 'universal' ? await getObject('apk', isDefault ? 'max' : platform + '-max') : null;
+    const max = type === 'arm' ? await getObject('apk', isDefault ? 'max' : platform + '-max') : null;
     const id = isDefault ? type : platform + '-' + type;
     const cur = await getObject('apk', id);
-    const maxVersion = Math.max(cur ? cur.versionCode : 0, type === 'universal' && platform === 'googlePlay' && max ? max.versionCode : 0);
+    const maxVersion = Math.max(cur ? cur.versionCode : 0, type === 'arm' && platform === 'googlePlay' && max ? max.versionCode : 0);
     if (versionCode <= maxVersion) {
       return false;
     }
@@ -1127,7 +1127,7 @@ function publishToTelegram (bot, task, build, sdkVariant, onDone, chatId, onlyPr
         parse_mode: 'HTML'
       };
       let ok =
-        (sdkVariant === 'latest' && abiVariant !== 'universal' && abiVariant !== 'x86' && abiVariant !== 'x64') ||
+        (sdkVariant === 'latest' && abiVariant !== 'arm' && abiVariant !== 'x86' && abiVariant !== 'x64') ||
         (build.variants.length === 1 && build.variants[0].abi.length === 1);
       if (onlyPrivate) {
         ok = !ok;
@@ -1391,7 +1391,8 @@ async function modifyNativeDebugSymbolsArchive (filePath, ndkVersion, abiVariant
     'x86_64'
   ].filter((abi) => {
     switch (abiVariant) {
-      case 'universal': return true;
+      case 'arm': return abi === 'arm64-v8a' || abi === 'armeabi-v7a';
+      case 'intel': return abi === 'x86_64' || abi === 'x86';
       case 'arm64': return abi === 'arm64-v8a';
       case 'arm32': return abi === 'armeabi-v7a';
       case 'x86': return abi === 'x86';
@@ -1630,7 +1631,7 @@ function uploadToGooglePlay (task, build, draftOnly, onDone) {
       const variant = build.variants[i];
       for (let abiIndex = 0; abiIndex < variant.abi.length; abiIndex++) {
         const abiVariant = variant.abi[abiIndex];
-        if (abiVariant === 'universal') {
+        if (abiVariant === 'arm') {
           onBuildUploaded(variant, abiVariant);
           continue;
         }
@@ -1886,7 +1887,7 @@ async function submitHuaweiAppUpdate (accessToken) {
 function uploadToHuaweiAppGallery (task, build, onDone, draftOnly) {
   (async () => {
     const sdkVariant = 'latest';
-    const abiVariant = 'universal';
+    const abiVariant = 'arm';
     const targetFiles = build.files[sdkVariant][abiVariant];
     // Step 1. Obtain access_token
     const auth = await obtainHuaweiAccessToken();
@@ -2176,7 +2177,7 @@ function uploadToGithub (task, build, onDone, commandArgsRaw, isPrerelease, tagN
     'lollipop',
     'legacy'
   ];
-  const allAbiFlavors = ['universal', 'arm64', 'arm32', 'x64', 'x86'];
+  const allAbiFlavors = ['arm', 'arm64', 'arm32', 'x64', 'x86'];
   const sortBy = (variants) => {
     return (a, b) => {
       const aIndex = variants.indexOf(a);
@@ -2280,7 +2281,7 @@ function uploadToGithub (task, build, onDone, commandArgsRaw, isPrerelease, tagN
         for (const sdkFlavor in build.files) {
           const files = build.files[sdkFlavor].universal;
           if (files) {
-            await traceMaxApkVersionCode(sdkFlavor, 'universal', build.version.code, new Date(), 'github');
+            await traceMaxApkVersionCode(sdkFlavor, 'arm', build.version.code, new Date(), 'github');
           }
         }
       }
@@ -2611,11 +2612,11 @@ function processPrivateCommand (botId, bot, msg, command, commandArgsRaw) {
           'none';
 
         const allVariants = [
-          {name: 'latest', abi: [ 'universal', 'arm64', 'arm32', 'x64', 'x86' ]},
-          {name: 'qrs', abi: [ 'universal', 'arm64', 'arm32', 'x64', 'x86' ]},
-          {name: 'tens', abi: [ 'universal', 'arm64', 'arm32', 'x64', 'x86' ]},
-          {name: 'marshmallow', abi: [ 'universal', 'arm64', 'arm32', 'x64', 'x86' ]},
-          {name: 'lollipop', abi: [ 'universal', 'arm64', 'arm32', 'x64', 'x86' ]},
+          {name: 'latest', abi: [ 'arm', 'arm64', 'arm32', 'x64', 'x86' ]},
+          {name: 'qrs', abi: [ 'arm', 'arm64', 'arm32', 'x64', 'x86' ]},
+          {name: 'tens', abi: [ 'arm', 'arm64', 'arm32', 'x64', 'x86' ]},
+          {name: 'marshmallow', abi: [ 'arm', 'arm64', 'arm32', 'x64', 'x86' ]},
+          {name: 'lollipop', abi: [ 'arm', 'arm64', 'arm32', 'x64', 'x86' ]},
           {name: 'legacy', abi: [ 'arm32', 'x86' ]}
         ];
 
@@ -2639,6 +2640,8 @@ function processPrivateCommand (botId, bot, msg, command, commandArgsRaw) {
               variant.name === buildType
             );
             break;
+          case 'arm':
+          case 'intel':
           case 'universal':
           case 'arm64':
           case 'arm32':
@@ -2648,7 +2651,7 @@ function processPrivateCommand (botId, bot, msg, command, commandArgsRaw) {
             break;
           case 'pr':
           case 'huawei':
-            selectedVariants = [{name: 'latest', abi: ['universal']}];
+            selectedVariants = [{name: 'latest', abi: ['arm']}];
             break;
           case 'github':
             selectedVariants = [];
@@ -3176,15 +3179,18 @@ function processPrivateCommand (botId, bot, msg, command, commandArgsRaw) {
               ])
             });
 
-            const firstVariant = build.variants[0];
-            const lintSuffix = ucfirst(firstVariant.name) + ucfirst(firstVariant.abi[0]);
-            build.tasks.push({
-              name: 'lint' + lintSuffix,
-              displayName: 'Check critical issues',
-              script: 'gradlew',
-              args: gradlewArgs.concat([
-                'lint' + lintSuffix + 'Release'
-              ])
+            build.variants.forEach((variant) => {
+              const lintSuffix = ucfirst(variant.name);
+              build.tasks.push({
+                name: 'lintVital' + lintSuffix,
+                displayName: 'Check critical issues',
+                script: 'gradlew',
+                args: gradlewArgs.concat(variant.name === 'legacy' ? [
+                  '-PuseLegacyNdk=true'
+                ] : []).concat([
+                  'lint' + lintSuffix + 'Release'
+                ])
+              });
             });
           }
 
@@ -3200,8 +3206,11 @@ function processPrivateCommand (botId, bot, msg, command, commandArgsRaw) {
                   script: 'gradlew',
                   args: gradlewArgs.concat(variant.name === 'legacy' ? [
                     '-PuseLegacyNdk=true'
+                  ] : []).concat(abi === 'arm' ? [
+                    '-PuseLegacyPackaging=true'
                   ] : []).concat([
-                    'assemble' + variantSuffix + 'Release',
+                    'assemble' + ucfirst(variant.name) + 'Release',
+                    '-Pabi=' + abi,
                     LOCAL ? '--info' : '--quiet',
                     '--stacktrace',
                     '--console=plain'
