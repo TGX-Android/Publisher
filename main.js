@@ -279,10 +279,6 @@ function ucfirst (str) {
   return str && str.length ? str.charAt(0).toUpperCase() + str.substring(1) : str;
 }
 
-function escapeRegExp (string) {
-  return string.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
-}
-
 function empty (obj) {
   if (typeof obj === 'object') {
     for (const key in obj) {
@@ -849,28 +845,6 @@ async function killTask (task) {
   }
 }
 
-function findFile (dir, regexp, callback) {
-  fs.readdir(dir, {withFileTypes: true}, (err, files) => {
-    if (err) {
-      console.error('Cannot lookup for file', dir);
-      callback(null);
-    } else {
-      for (let i = 0; i < files.length; i++) {
-        const fileName = files[i].name;
-        let match = fileName.match(regexp);
-        if (match && match.length) {
-          if (match[0].length === fileName.length) {
-            callback(fileName);
-            return;
-          }
-        }
-      }
-      console.error('None of the files match regexp!', regexp, JSON.stringify(files));
-      callback(null);
-    }
-  });
-}
-
 function toDisplayAlgorithm (algorithm) {
   switch (algorithm) {
     case 'md5': return 'MD5';
@@ -889,81 +863,63 @@ function getDisplayVariant (variant) {
 }
 
 function getBuildFiles (build, sdkVariant, abiVariant, callback) {
-  const folder = sdkVariant + ucfirst(abiVariant) ; // latestUniversalRelease
-  const architecture = getDisplayVariant(abiVariant);
-  
-  const outputsDir = settings.TGX_SOURCE_PATH + '/app/build/outputs';
+  const outputsDir = path.join(settings.TGX_SOURCE_PATH, 'app', 'build', 'outputs');
 
-  const mappingDir = outputsDir + '/mapping/' + folder + 'Release';
-  const apkDir = outputsDir + '/apk/' + folder + '/release';
+  const apkDir = path.join(outputsDir, 'apk', sdkVariant, 'release');
+  const mappingFile = path.join(outputsDir, 'mapping', sdkVariant + 'Release', 'mapping.txt');
+  const nativeDebugSymbolsFile = path.join(outputsDir, 'native-debug-symbols', sdkVariant + 'Release', 'native-debug-symbols.zip');
 
-  const nativeDebugSymbolsFile = outputsDir + '/native-debug-symbols/' + folder + 'Release' + '/native-debug-symbols.zip';
+  // These outputs are shared by all ABIs of the variant and get overwritten by the next Gradle run,
+  // while this APK may still be uploading. Copy everything into a separate folder.
+  const targetDir = path.join(outputsDir, 'publisher', sdkVariant, abiVariant);
 
-  const result = { };
-
-  const check = () => {
-    if (result.nativeDebugSymbolsFile !== undefined && result.apkFile !== undefined && (result.apkFile === null || (result.apkFile.checksum && result.apkFile.checksum.md5 !== undefined && result.apkFile.checksum.sha1 !== undefined && result.apkFile.checksum.sha256 !== undefined)) && result.mappingFile !== undefined && result.metadata !== undefined) {
-      if (result.nativeDebugSymbolsFile && result.apkFile && (result.apkFile.checksum && result.apkFile.checksum.sha256 && result.apkFile.checksum.sha1 && result.apkFile.checksum.md5) && (result.mappingFile || build.outputApplication.dontObfuscate) && result.metadata) {
-        callback(result);
-      } else {
-        console.error('Cannot find build files for #' + build.version.name, JSON.stringify(result));
-        callback(null);
-      }
+  (async () => {
+    const metadata = JSON.parse(await fs.promises.readFile(path.join(apkDir, 'output-metadata.json'), 'utf-8'));
+    // Each -Pabi build produces a single APK
+    const element = metadata.elements && metadata.elements.length === 1 ? metadata.elements[0] : null;
+    if (!element || !element.versionCode) {
+      throw new Error('Unexpected output-metadata.json: ' + JSON.stringify(metadata));
     }
-  };
 
-  const prefix = '^' + escapeRegExp(build.outputApplication.name || 'Telegram X')
-    .replace(/ /g, '-')
-    .replace(/#/g, '') + '-' +
-    build.version.name.replace(/\./gi, '\\.') + '(?:\\+[0-9,]+)?' +
-    (sdkVariant !== 'latest' ? '(?:-' + sdkVariant + ')?' : '') +
-    (architecture ? '(?:-' + architecture + ')?' : '') +
-    (build.outputApplication.extension ? '(?:-' + build.outputApplication.extension + ')?' : '');
-  fs.exists(nativeDebugSymbolsFile, (exists) => {
-    result.nativeDebugSymbolsFile = exists ? {path: nativeDebugSymbolsFile} : null;
-    check();
-  });
-  findFile(apkDir, RegExp(prefix + '\\.apk$'), (apkFile) => {
-    if (apkFile) {
-      result.apkFile = {path: apkDir + '/' + apkFile};
-      ['sha256', 'sha1', 'md5'].forEach((algorithm) => {
-        checksum(result.apkFile.path, (err, checksum) => {
-          if (!result.apkFile.checksum) {
-            result.apkFile.checksum = {};
-          }
-          result.apkFile.checksum[algorithm] = checksum ? checksum : null;
-          check();
-        }, algorithm);
+    await fs.promises.rm(targetDir, {recursive: true, force: true});
+    await fs.promises.mkdir(targetDir, {recursive: true});
+
+    const apkFile = {path: path.join(targetDir, element.outputFile), checksum: {}};
+    await fs.promises.copyFile(path.join(apkDir, element.outputFile), apkFile.path);
+    for (const algorithm of ['sha256', 'sha1', 'md5']) {
+      apkFile.checksum[algorithm] = await new Promise((accept) => {
+        checksum(apkFile.path, (err, hash) => accept(hash), algorithm);
       });
-    } else {
-      result.apkFile = null;
-      check();
     }
-  });
-  findFile(apkDir, RegExp('^output-metadata\\.json$'), (metadataFile) => {
-    if (metadataFile) {
-      fs.readFile(apkDir + '/' + metadataFile, 'utf-8', (err, data) => {
-        const metadata = err ? null : JSON.parse(data);
-        if (err || !(metadata &&
-            metadata.elements &&
-            metadata.elements.length === 1 &&
-            metadata.elements[0].versionCode)) {
-          console.error('Cannot read metadata file', err, data);
-          result.metadata = null;
-          check();
-        } else {
-          result.metadata = metadata.elements[0];
-          check();
-        }
-      });
-    } else {
-      result.metadata = null;
-      check();
+
+    let targetMappingFile = null;
+    if (fs.existsSync(mappingFile)) {
+      targetMappingFile = {path: path.join(targetDir, path.parse(element.outputFile).name + '.txt')};
+      await fs.promises.copyFile(mappingFile, targetMappingFile.path);
     }
-  });
-  findFile(mappingDir, RegExp(prefix + '\\.txt$'), (mappingFile) => {
-    result.mappingFile = mappingFile ? {path: mappingDir + '/' + mappingFile} : null;
-    check();
+
+    let targetNativeDebugSymbolsFile = null;
+    if (fs.existsSync(nativeDebugSymbolsFile)) {
+      targetNativeDebugSymbolsFile = {path: path.join(targetDir, 'native-debug-symbols.zip')};
+      await fs.promises.copyFile(nativeDebugSymbolsFile, targetNativeDebugSymbolsFile.path);
+    }
+
+    return {
+      apkFile,
+      metadata: element,
+      mappingFile: targetMappingFile,
+      nativeDebugSymbolsFile: targetNativeDebugSymbolsFile
+    };
+  })().then((result) => {
+    if (result.nativeDebugSymbolsFile && result.apkFile.checksum.sha256 && result.apkFile.checksum.sha1 && result.apkFile.checksum.md5 && (result.mappingFile || build.outputApplication.dontObfuscate)) {
+      callback(result);
+    } else {
+      console.error('Cannot find build files for #' + build.version.name, JSON.stringify(result));
+      callback(null);
+    }
+  }).catch((e) => {
+    console.error('Cannot find build files for #' + build.version.name, sdkVariant, abiVariant, e);
+    callback(null);
   });
 }
 
@@ -2279,7 +2235,7 @@ function uploadToGithub (task, build, onDone, commandArgsRaw, isPrerelease, tagN
           return;
         }
         for (const sdkFlavor in build.files) {
-          const files = build.files[sdkFlavor].universal;
+          const files = build.files[sdkFlavor].arm;
           if (files) {
             await traceMaxApkVersionCode(sdkFlavor, 'arm', build.version.code, new Date(), 'github');
           }
@@ -3188,7 +3144,7 @@ function processPrivateCommand (botId, bot, msg, command, commandArgsRaw) {
                 args: gradlewArgs.concat(variant.name === 'legacy' ? [
                   '-PuseLegacyNdk=true'
                 ] : []).concat([
-                  'lint' + lintSuffix + 'Release'
+                  'lintVital' + lintSuffix + 'Release'
                 ])
               });
             });
