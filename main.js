@@ -73,7 +73,7 @@ const TELEGRAM_APP_HASH = process.env.TELEGRAM_APP_HASH || settings.telegram.ser
 
 const PACKAGE_NAME = settings.app.id;
 
-['TGX_SOURCE_PATH', 'TGX_KEYSTORE_PATH', 'ANDROID_SDK_ROOT', 'GOOGLE_TOKEN_PATH', 'TDLIB_SYMBOLS_PATH'].forEach((path) => {
+['TGX_SOURCE_PATH', 'TGX_KEYSTORE_PATH', 'ANDROID_SDK_ROOT', 'RUST_DIR', 'GOOGLE_TOKEN_PATH', 'TDLIB_SYMBOLS_PATH'].forEach((path) => {
   if (!checkPath(process.env[path]) && !(LOCAL && path === 'GOOGLE_TOKEN_PATH')) {
     console.error(path + ' not found! ' + process.env[path]);
     process.exit(1);
@@ -2887,6 +2887,7 @@ function processPrivateCommand (botId, bot, msg, command, commandArgsRaw) {
                 }
               }
               let properties = 'sdk.dir=' + settings.ANDROID_SDK_ROOT + '\n' +
+                'rust.dir=' + settings.RUST_DIR + '\n' +
                 'keystore.file=' + settings.TGX_KEYSTORE_PATH + '\n' +
                 'app.sources_url=' + settings.app.sources_url + '\n' +
                 'app.download_url=' + settings.app.download_url + '\n' +
