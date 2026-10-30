@@ -53,7 +53,6 @@ function checkPath (path) {
 
 const LOCAL = process.env.TGX_PRODUCTION !== '1';
 const settings = JSON.parse(fs.readFileSync(path.join(__dirname, 'settings.json'), 'UTF-8'));
-const CHECKOUT_SCRIPT_PATH = path.join(__dirname, 'scripts', 'git-checkout.sh');
 if (!settings.app.id || !settings.app.id.match(/^(?!\.)[a-z0-9._]+(?!\.)$/))
   throw Error('app.id is not specified in settings.json or not valid: ' + settings.app.id);
 
@@ -73,7 +72,7 @@ const TELEGRAM_APP_HASH = process.env.TELEGRAM_APP_HASH || settings.telegram.ser
 
 const PACKAGE_NAME = settings.app.id;
 
-['TGX_SOURCE_PATH', 'TGX_KEYSTORE_PATH', 'ANDROID_SDK_ROOT', 'RUST_DIR', 'GOOGLE_TOKEN_PATH', 'TDLIB_SYMBOLS_PATH'].forEach((path) => {
+['TGX_SOURCE_PATH', 'TGX_KEYSTORE_PATH', 'ANDROID_SDK_ROOT', 'RUST_DIR', 'GIT_TOOLS_PATH', 'GOOGLE_TOKEN_PATH', 'TDLIB_SYMBOLS_PATH'].forEach((path) => {
   if (!checkPath(process.env[path]) && !(LOCAL && path === 'GOOGLE_TOKEN_PATH')) {
     console.error(path + ' not found! ' + process.env[path]);
     process.exit(1);
@@ -81,6 +80,7 @@ const PACKAGE_NAME = settings.app.id;
   }
   settings[path] = process.env[path];
 });
+const CHECKOUT_SCRIPT_PATH = path.join(settings.GIT_TOOLS_PATH, 'bin', 'git-checkout');
 
 // TELEGRAM CONSTANTS
 
@@ -2831,8 +2831,8 @@ function processPrivateCommand (botId, bot, msg, command, commandArgsRaw) {
           description: 'checkout',
           script: CHECKOUT_SCRIPT_PATH,
           args: [
-            remote,
-            currentBranch
+            '-f',
+            remote + '/' + currentBranch
           ]
         };
         const newFetchGithubDetailsTask = (pullRequestId) => {
@@ -3373,14 +3373,14 @@ function processPrivateCommand (botId, bot, msg, command, commandArgsRaw) {
               name: 'checkoutTdlib',
               displayName: 'Fetch TDLib',
               script: CHECKOUT_SCRIPT_PATH,
-              args: ['origin', 'main'],
+              args: ['-f', 'origin/main'],
               cwd: tdlibPath
             });
             build.tasks.push({
               name: 'checkoutTd',
               displayName: 'Fetch latest tdlib/td',
               script: CHECKOUT_SCRIPT_PATH,
-              args: ['origin', 'master'],
+              args: ['-f', 'origin/master'],
               cwd: path.join(tdlibPath, 'source', 'td')
             });
             build.tasks.push({
