@@ -131,6 +131,15 @@ const GITHUB_BUILDS = {
   'lollipop': ['arm'],
   'legacy': ['arm32']
 };
+// TDLib is built for minimum API level of each flavor, see tdlib/source/install.sh
+const TDLIB_API_LEVELS = {
+  'latest': 33,
+  'qrs': 29,
+  'tens': 24,
+  'marshmallow': 23,
+  'lollipop': 21,
+  'legacy': 16
+};
 
 // MAIN
 
@@ -873,7 +882,7 @@ function toAbiFilter (abiVariant) {
   }
 }
 
-function getBuildFiles (build, sdkVariant, abiVariant, callback) {
+function getBuildFiles (build, sdkVariant, abiVariant, forGooglePlay, callback) {
   const outputsDir = path.join(settings.TGX_SOURCE_PATH, 'app', 'build', 'outputs');
 
   const apkDir = path.join(outputsDir, 'apk', sdkVariant, 'release');
@@ -882,7 +891,7 @@ function getBuildFiles (build, sdkVariant, abiVariant, callback) {
 
   // These outputs are shared by all ABIs of the variant and get overwritten by the next Gradle run,
   // while this APK may still be uploading. Copy everything into a separate folder.
-  const targetDir = path.join(outputsDir, 'publisher', sdkVariant, abiVariant);
+  const targetDir = path.join(outputsDir, forGooglePlay ? 'publisher-googlePlay' : 'publisher', sdkVariant, abiVariant);
 
   (async () => {
     const metadata = JSON.parse(await fs.promises.readFile(path.join(apkDir, 'output-metadata.json'), 'utf-8'));
@@ -1229,7 +1238,9 @@ function uploadToTelegram (bot, task, build, sdkVariant, abiVariant, onDone) {
     files.apkFile.remote_id = apkMessage.document.file_id;
     modifyNativeDebugSymbolsArchive(
       files.nativeDebugSymbolsFile.path,
+      files.apkFile.path,
       build.version.ndk[sdkVariant === 'legacy' ? 'legacy' : 'primary'],
+      sdkVariant,
       abiVariant
     ).then((nativeDebugSymbolsPath) => {
       attemptAction(maxUploadAttemptCount, (accept, reject) => {
@@ -1336,16 +1347,57 @@ async function fetchAvailableLanguageCodes () {
   return ['en'];
 }
 
-async function modifyNativeDebugSymbolsArchive (filePath, ndkVersion, abiVariant) {
+// Build ID (NT_GNU_BUILD_ID note) of ELF file, the same in a stripped library and in its debug symbols
+function readElfBuildId (data) {
+  try {
+    if (data.readUInt32BE(0) !== 0x7f454c46) {
+      return null;
+    }
+    const is64Bit = data[4] === 2;
+    const isLittleEndian = data[5] === 1;
+    const readHalf = (offset) => isLittleEndian ? data.readUInt16LE(offset) : data.readUInt16BE(offset);
+    const readWord = (offset) => isLittleEndian ? data.readUInt32LE(offset) : data.readUInt32BE(offset);
+    const readOffset = (offset) => !is64Bit ? readWord(offset) :
+      Number(isLittleEndian ? data.readBigUInt64LE(offset) : data.readBigUInt64BE(offset));
+    const programHeaderOffset = readOffset(is64Bit ? 32 : 28);
+    const programHeaderSize = readHalf(is64Bit ? 54 : 42);
+    const programHeaderCount = readHalf(is64Bit ? 56 : 44);
+    for (let i = 0; i < programHeaderCount; i++) {
+      const programHeader = programHeaderOffset + i * programHeaderSize;
+      if (readWord(programHeader) !== 4 /*PT_NOTE*/) {
+        continue;
+      }
+      const alignment = Math.max(4, readOffset(programHeader + (is64Bit ? 48 : 28)));
+      const align = (size) => Math.ceil(size / alignment) * alignment;
+      let note = readOffset(programHeader + (is64Bit ? 8 : 4));
+      const end = note + readOffset(programHeader + (is64Bit ? 32 : 16));
+      while (note + 12 <= end) {
+        const nameSize = readWord(note);
+        const descriptorSize = readWord(note + 4);
+        const descriptor = note + 12 + align(nameSize);
+        if (readWord(note + 8) === 3 /*NT_GNU_BUILD_ID*/ && data.toString('latin1', note + 12, note + 12 + nameSize) === 'GNU\0') {
+          return data.toString('hex', descriptor, descriptor + descriptorSize);
+        }
+        note = descriptor + align(descriptorSize);
+      }
+    }
+  } catch (e) {
+    console.log('Cannot read ELF build-id', e);
+  }
+  return null;
+}
+
+async function modifyNativeDebugSymbolsArchive (filePath, apkPath, ndkVersion, sdkVariant, abiVariant) {
   let allowExtraDebugSymbols = false;
 
   const tdlibPath = path.join(settings.TGX_SOURCE_PATH, 'tdlib');
+  const tdlibPlatform = 'android-' + TDLIB_API_LEVELS[sdkVariant];
   const extraNativeDebugSymbolsPath = settings.TDLIB_SYMBOLS_PATH ?
-    path.join(settings.TDLIB_SYMBOLS_PATH, ndkVersion, 'native-debug-symbols') :
-    path.join(tdlibPath, 'source', 'build', ndkVersion, 'native-debug-symbols');
+    path.join(settings.TDLIB_SYMBOLS_PATH, ndkVersion, tdlibPlatform, 'native-debug-symbols') :
+    path.join(tdlibPath, 'source', 'build', ndkVersion, tdlibPlatform, 'native-debug-symbols');
   if (settings.add_tdlib_debug_symbols === true) {
     if (fs.existsSync(extraNativeDebugSymbolsPath)) {
-      // Make sure tdlib/version.txt and tdlib/source/build/$ndkVersion/native-debug-symbols/version.txt match
+      // Make sure tdlib/version.txt and tdlib/source/build/$ndkVersion/android-$apiLevel/native-debug-symbols/version.txt match
       const tdlibVersionPath = path.join(tdlibPath, 'version.txt');
       const extraNativeDebugSymbolsVersionPath = path.join(extraNativeDebugSymbolsPath, 'version.txt');
       if (fs.existsSync(tdlibVersionPath) && fs.existsSync(extraNativeDebugSymbolsVersionPath)) {
@@ -1402,15 +1454,25 @@ async function modifyNativeDebugSymbolsArchive (filePath, ndkVersion, abiVariant
   // Copy extra *.so.dbg files to native-debug-symbols-modified.zip
   let addedCount = 0;
   if (allowExtraDebugSymbols) {
+    const apkZip = new AdmZip(apkPath);
     abiFilter.forEach((abi) => {
       const extraPath = path.join(extraNativeDebugSymbolsPath, abi);
       if (fs.existsSync(extraPath) && fs.statSync(extraPath).isDirectory()) {
         fs.readdirSync(extraPath).forEach((name) => {
-          const entryName = `${abi}/${name}`;
+          const libraryName = name.replace(/\.(dbg|debug)$/, '');
+          const entryName = `${abi}/${libraryName}.dbg`;
           if (!existingZip.getEntry(entryName)) {
             const extraSymbolsFile = path.join(extraPath, name);
-            existingZip.addLocalFile(extraSymbolsFile, abi);
-            addedCount++;
+            const extraSymbols = fs.readFileSync(extraSymbolsFile);
+            const extraSymbolsBuildId = readElfBuildId(extraSymbols);
+            const libraryEntry = apkZip.getEntry(`lib/${abi}/${libraryName}`);
+            const libraryBuildId = libraryEntry ? readElfBuildId(libraryEntry.getData()) : null;
+            if (libraryBuildId !== null && libraryBuildId === extraSymbolsBuildId) {
+              existingZip.addFile(entryName, extraSymbols);
+              addedCount++;
+            } else {
+              console.log('Skipping', extraSymbolsFile, 'with build-id', extraSymbolsBuildId, 'as', `lib/${abi}/${libraryName}`, 'in', apkPath, 'has build-id', libraryBuildId);
+            }
           }
         });
       }
@@ -1552,9 +1614,41 @@ function prepareForPublishing (task, build, onDone) {
   };
 }
 
-function uploadToGooglePlay (task, build, draftOnly, onDone) {
+// Reasons of Google Play failures are only in response bodies, keep them in the service chat
+function reportGooglePlayError (bot, task, build, title, error) {
+  const response = error ? error.response : null;
+  const details = {
+    message: error ? error.message : null,
+    code: error ? error.code : null,
+    request: error && error.config ? error.config.method + ' ' + error.config.url : null,
+    status: response ? response.status + ' ' + response.statusText : null,
+    response: response ? response.data : null,
+    stack: error && !response ? error.stack : null
+  };
+  let text = title + '\n\n';
+  try {
+    text += JSON.stringify(details, null, 2);
+  } catch (e) {
+    text += error;
+  }
+  console.error(text);
+  task.logPrivately(title + ': ' + (response ? response.status + ' ' + response.statusText : error && (error.code || error.name)));
+  const options = {
+    reply_to_message_id: build.serviceMessageId,
+    disable_web_page_preview: true
+  };
+  const sent = text.length <= MAX_TEXT_MESSAGE_LENGTH ?
+    bot.sendMessage(build.serviceChatId, text, options) :
+    bot.sendDocument(build.serviceChatId, Buffer.from(text, 'utf-8'), options, {
+      filename: 'google-play-error.txt',
+      contentType: 'text/plain'
+    });
+  sent.catch(globalErrorHandler());
+}
+
+function uploadToGooglePlay (bot, task, build, draftOnly, onDone) {
   play.edits.insert().then((appEdit) => {
-    console.log('Created an AppEdit', JSON.stringify(appEdit));
+    console.log('Created an AppEdit', JSON.stringify(appEdit.data));
     const editId = appEdit.data.id;
 
     let remainingApkCount = 0;
@@ -1584,28 +1678,28 @@ function uploadToGooglePlay (task, build, draftOnly, onDone) {
         }
       }).then((updatedTrack) => {
         const appSubmitted = (appEdit) => {
-          console.log('Successfully commited google play changes', JSON.stringify(appEdit));
+          console.log('Successfully commited google play changes', JSON.stringify(appEdit.data));
           tracePublishedGooglePlayBuild(build).then(() => {
             onDone(0);
           });
         };
         const appSubmitFailed = (e) => {
-          console.error('Failed to commit changes to Google Play', build.googlePlayTrack, e);
+          reportGooglePlayError(bot, task, build, 'Failed to commit changes to Google Play ' + build.googlePlayTrack, e);
           onDone(1);
         };
-        console.log('Successfully updated track', JSON.stringify(updatedTrack));
+        console.log('Successfully updated track', JSON.stringify(updatedTrack.data));
         play.edits.commit({
           editId: editId
         }).then(appSubmitted)
           .catch((e) => {
-          console.error('Failed to commit changes to Google Play, retrying with changesNotSentForReview = true', build.googlePlayTrack, e);
+          reportGooglePlayError(bot, task, build, 'Failed to commit changes to Google Play ' + build.googlePlayTrack + ', retrying with changesNotSentForReview = true', e);
           play.edits.commit({
             editId: editId,
             changesNotSentForReview: true
           }).then(appSubmitted).catch(appSubmitFailed);
         });
       }).catch((updatedTrackError) => {
-        console.error('Failed to update track', build.googlePlayTrack, updatedTrackError);
+        reportGooglePlayError(bot, task, build, 'Failed to update track ' + build.googlePlayTrack, updatedTrackError);
         onDone(1);
       });
     };
@@ -1617,7 +1711,7 @@ function uploadToGooglePlay (task, build, draftOnly, onDone) {
           onBuildUploaded(variant, abiVariant);
           continue;
         }
-        const files = build.files[variant.name][abiVariant];
+        const files = build.files[variant.name][abiVariant].googlePlay;
         const apkStream = fs.createReadStream(files.apkFile.path);
 
         play.edits.apks.upload({
@@ -1627,7 +1721,7 @@ function uploadToGooglePlay (task, build, draftOnly, onDone) {
             body: apkStream
           }
         }).then((uploadedApk) => {
-          console.log('Successfully uploaded APK', JSON.stringify(uploadedApk));
+          console.log('Successfully uploaded APK', JSON.stringify(uploadedApk.data));
           traceMaxApkVersionCode(variant.name, abiVariant, uploadedApk.data.versionCode, new Date(), 'googlePlay');
           if (uploadedApk.data.binary.sha256 !== files.apkFile.checksum.sha256) {
             console.error('SHA-256 mismatch!', variant.name, abiVariant);
@@ -1638,7 +1732,9 @@ function uploadToGooglePlay (task, build, draftOnly, onDone) {
           uploadedVersionCodes.push(uploadedApk.data.versionCode);
           modifyNativeDebugSymbolsArchive(
             files.nativeDebugSymbolsFile.path,
+            files.apkFile.path,
             build.version.ndk[variant.name === 'legacy' ? 'legacy' : 'primary'],
+            variant.name,
             abiVariant
           ).then((nativeDebugSymbolsPath) => {
             attemptAction(5, (accept, reject) => {
@@ -1655,9 +1751,9 @@ function uploadToGooglePlay (task, build, draftOnly, onDone) {
                 .then(accept)
                 .catch(reject);
             }, (e, attemptNo) => {
-              console.log('[RETRY]', 'Trying again to upload native-debug-symbols.zip, attemptNo:', attemptNo, e);
+              reportGooglePlayError(bot, task, build, '[RETRY] Trying again to upload native-debug-symbols.zip ' + variant.name + ' ' + abiVariant + ', attemptNo: ' + attemptNo, e);
             }).then((uploadedNativeDebugSymbols) => {
-              console.log('[!!!]', 'native-debug-symbols.zip uploaded', variant.name, abiVariant, JSON.stringify(uploadedNativeDebugSymbols));
+              console.log('[!!!]', 'native-debug-symbols.zip uploaded', variant.name, abiVariant, JSON.stringify(uploadedNativeDebugSymbols.data));
               const mappingStream = fs.createReadStream(files.mappingFile.path);
               play.edits.deobfuscationfiles.upload({
                 editId: editId,
@@ -1669,26 +1765,26 @@ function uploadToGooglePlay (task, build, draftOnly, onDone) {
                 }
               }).then((uploadedMappingFile) => {
                 mappingStream.close();
-                console.log('Mapping file uploaded', variant.name, abiVariant, JSON.stringify(uploadedMappingFile));
+                console.log('Mapping file uploaded', variant.name, abiVariant, JSON.stringify(uploadedMappingFile.data));
                 // Success! Now we can proceed.
                 onBuildUploaded(variant);
               }).catch((mappingFileUploadError) => {
-                console.error('Failed to upload mapping file.', variant.name, abiVariant, mappingFileUploadError);
+                reportGooglePlayError(bot, task, build, 'Failed to upload mapping file ' + variant.name + ' ' + abiVariant, mappingFileUploadError);
                 onDone(1);
               });
             }).catch((nativeDebugSymbolsUploadError) => {
-              console.error('Failed to upload native-debug-symbols.zip', variant.name, abiVariant, nativeDebugSymbolsUploadError);
+              reportGooglePlayError(bot, task, build, 'Failed to upload native-debug-symbols.zip ' + variant.name + ' ' + abiVariant, nativeDebugSymbolsUploadError);
               onDone(1);
             });
           });
         }).catch((apkUploadError) => {
-          console.error('Failed to upload apk', variant.name, abiVariant, apkUploadError);
+          reportGooglePlayError(bot, task, build, 'Failed to upload apk ' + variant.name + ' ' + abiVariant, apkUploadError);
           onDone(1);
         });
       }
     }
   }).catch((appEditError) => {
-    console.error('Failed to create AppEdit', appEditError);
+    reportGooglePlayError(bot, task, build, 'Failed to create AppEdit', appEditError);
     onDone(1);
   });
 
@@ -3182,19 +3278,30 @@ function processPrivateCommand (botId, bot, msg, command, commandArgsRaw) {
             const splitAbis = variant.abi.filter((abi) => toAbiFilter(abi) !== null);
             const useSplits = splitAbis.length > 1;
 
-            variant.abi.forEach((abi) => {
+            // APKs sent to Telegram have compressed native libraries and dex,
+            // APKs for Google Play are built without it by one more Gradle run ('arm' is not uploaded there)
+            const apks = variant.abi.map((abi) => ({abi, forGooglePlay: false}));
+            if (build.googlePlayTrack) {
+              variant.abi.filter((abi) => abi !== 'arm').forEach((abi) => {
+                apks.push({abi, forGooglePlay: true});
+              });
+            }
+
+            apks.forEach(({abi, forGooglePlay}) => {
               const variantSuffix = ucfirst(variant.name) + ucfirst(abi);
               const variantPrefix = '[' + variant.name + ',' + abi + ']';
+              const platformSuffix = forGooglePlay ? 'GooglePlay' : '';
+              const platformDisplaySuffix = forGooglePlay ? ' for Google Play' : '';
 
               const isSplit = useSplits && splitAbis.includes(abi);
               if (!skipBuild && (!isSplit || abi === splitAbis[0])) {
                 build.tasks.push({
-                  name: 'assemble' + (isSplit ? ucfirst(variant.name) + splitAbis.map(ucfirst).join('') : variantSuffix),
-                  displayName: (isSplit ? '[' + variant.name + ',' + splitAbis.join('+') + ']' : variantPrefix) + ' Assemble',
+                  name: 'assemble' + (isSplit ? ucfirst(variant.name) + splitAbis.map(ucfirst).join('') : variantSuffix) + platformSuffix,
+                  displayName: (isSplit ? '[' + variant.name + ',' + splitAbis.join('+') + ']' : variantPrefix) + ' Assemble' + platformDisplaySuffix,
                   script: 'gradlew',
                   args: gradlewArgs.concat(variant.name === 'legacy' ? [
                     '-PuseLegacyNdk=true'
-                  ] : []).concat(abi === 'arm' ? [
+                  ] : []).concat(!forGooglePlay ? [
                     '-PuseLegacyPackaging=true'
                   ] : []).concat([
                     'assemble' + ucfirst(variant.name) + 'Release'
@@ -3209,15 +3316,19 @@ function processPrivateCommand (botId, bot, msg, command, commandArgsRaw) {
               }
 
               build.tasks.push({
-                name: 'verify' + variantSuffix,
-                displayName: variantPrefix + ' Verify',
+                name: 'verify' + variantSuffix + platformSuffix,
+                displayName: variantPrefix + ' Verify' + platformDisplaySuffix,
                 act: (task, callback) => {
-                  getBuildFiles(build, variant.name, abi, (files) => {
+                  getBuildFiles(build, variant.name, abi, forGooglePlay, (files) => {
                     if (!build.aborted && files) {
                       if (!build.files[variant.name]) {
                         build.files[variant.name] = {};
                       }
-                      build.files[variant.name][abi] = files;
+                      if (forGooglePlay) {
+                        build.files[variant.name][abi].googlePlay = files;
+                      } else {
+                        build.files[variant.name][abi] = files;
+                      }
                       if (files.apkFile.checksum) {
                         traceBuiltApk(build, task, variant.name, abi, files.apkFile.checksum);
                         if (files.apkFile.checksum.sha256) {
@@ -3231,14 +3342,16 @@ function processPrivateCommand (botId, bot, msg, command, commandArgsRaw) {
                   });
                 }
               });
-              build.tasks.push({
-                name: 'upload' + variantSuffix,
-                displayName: variantPrefix + ' Upload',
-                isAsync: true,
-                act: (task, callback) => {
-                  return uploadToTelegram(bot, task, build, variant.name, abi, callback);
-                }
-              });
+              if (!forGooglePlay) {
+                build.tasks.push({
+                  name: 'upload' + variantSuffix,
+                  displayName: variantPrefix + ' Upload',
+                  isAsync: true,
+                  act: (task, callback) => {
+                    return uploadToTelegram(bot, task, build, variant.name, abi, callback);
+                  }
+                });
+              }
             });
 
             if (variant.name === 'latest' && build.publicChatId && (build.telegramTrack || isPRBuild) && (build.variants.length > 1 || variant.abi.length > 1)) {
@@ -3302,7 +3415,7 @@ function processPrivateCommand (botId, bot, msg, command, commandArgsRaw) {
                 displayName: 'Upload to Google Play',
                 isAsync: true,
                 act: (task, callback) => {
-                  return uploadToGooglePlay(task, build, draftOnly, callback);
+                  return uploadToGooglePlay(bot, task, build, draftOnly, callback);
                 }
               });
             }
@@ -3331,6 +3444,8 @@ function processPrivateCommand (botId, bot, msg, command, commandArgsRaw) {
                 name: 'createTag',
                 displayName: 'Create git tag',
                 description: 'createTag',
+                // Wait for the Google Play upload, its failure cancels the tag and GitHub release
+                needsAwait: !!build.googlePlayTrack,
                 cmd: 'git fetch && \
                       git tag -f ' + tagName + ' ' + build.git.commit.long + ' && \
                       git push origin --tags -f'
