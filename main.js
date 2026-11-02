@@ -1518,7 +1518,8 @@ function prepareForPublishing (task, build, onDone) {
     return;
   }
 
-  let variantsToCheck = build.variants.length;
+  // Each APK of each variant is checked
+  let variantsToCheck = build.variants.reduce((count, variant) => count + variant.abi.length, 0);
   let onVariantChecked = () => {
     if (--variantsToCheck !== 0 || task.endTime)
       return;
@@ -1576,6 +1577,7 @@ function prepareForPublishing (task, build, onDone) {
     const variant = build.variants[i];
     if (!build.files[variant.name]) {
       console.error('Passed variant is not built', variant);
+      task.logPrivately('Variant ' + variant.name + ' is not built');
       onDone(1);
       return;
     }
@@ -1584,11 +1586,13 @@ function prepareForPublishing (task, build, onDone) {
       const files = build.files[variant.name][abiVariant];
       if (!files) {
         console.error('Passed variant is not built', variant.name, abiVariant);
+        task.logPrivately('Variant ' + variant.name + ' ' + abiVariant + ' is not built');
         onDone(1);
         return;
       }
       if (files.metadata.versionCode < cur.maximumApkVersionCode) {
         console.error('Version code is lower than maximum', variant, files.metadata.versionCode, cur.maximumApkVersionCode);
+        task.logPrivately('Version code ' + files.metadata.versionCode + ' of ' + variant.name + ' ' + abiVariant + ' is lower than maximum ' + cur.maximumApkVersionCode);
         onDone(1);
         return;
       }
@@ -1596,7 +1600,7 @@ function prepareForPublishing (task, build, onDone) {
         if (success || build.forceUploadApk) {
           onVariantChecked();
         } else {
-          const msg = 'APK #' + build.version.name + ' was already published to ' + build.distributionPlatform + '. Version bump required.';
+          const msg = 'APK #' + build.version.name + ' ' + variant.name + ' ' + abiVariant + ' (' + files.metadata.versionCode + ') was already uploaded to ' + build.distributionPlatforms.join(' or ') + '. Version bump required.';
           task.logPublicly(msg);
           console.error(msg);
           onDone(1);
@@ -2083,6 +2087,49 @@ async function createGitHubRelease (owner, repository, tagName, releaseName, rel
     console.error('Failed to create GitHub release', e);
     return null;
   }
+}
+
+// Commits version.app + 1 to version.properties of the branch on GitHub by its API, without fetching the repository
+async function bumpVersionCode (task, remoteUrl, branch) {
+  const repository = remoteUrl.match(/github\.com\/([^/]+\/[^/]+?)(?:\.git)?\/?$/);
+  if (!repository) {
+    throw new Error('Not a GitHub repository: ' + remoteUrl);
+  }
+  const apiUrl = 'https://api.github.com/repos/' + repository[1] + '/contents/version.properties';
+  const headers = {
+    'Accept': 'application/vnd.github+json',
+    'Authorization': 'Bearer ' + settings.github.access_token,
+    'X-GitHub-Api-Version': '2022-11-28',
+    'User-Agent': 'Telegram-X-Publisher'
+  };
+  const response = await fetchHttp(apiUrl + '?ref=' + branch, false, {headers});
+  if (response.statusCode !== 200) {
+    throw new Error('GET ' + response.statusCode + ' ' + response.statusMessage + ': ' + response.content);
+  }
+  const file = JSON.parse(response.content);
+  const content = Buffer.from(file.content, 'base64').toString('utf-8');
+  const version = content.match(/^version\.app=([0-9]+)$/m);
+  if (!version) {
+    throw new Error('version.app is not found in version.properties of ' + branch);
+  }
+  const newVersion = parseInt(version[1]) + 1;
+  const message = 'Version bump to `' + newVersion + '`';
+  const data = {
+    message,
+    content: Buffer.from(content.replace(version[0], 'version.app=' + newVersion), 'utf-8').toString('base64'),
+    sha: file.sha,
+    branch
+  };
+  const update = await postHttp(apiUrl, data, false, {
+    headers: Object.assign({
+      'Content-Type': 'application/json',
+      'Content-Length': Buffer.byteLength(JSON.stringify(data))
+    }, headers)
+  }, 'PUT');
+  if (update.statusCode < 200 || update.statusCode >= 300) {
+    throw new Error('PUT ' + update.statusCode + ' ' + update.statusMessage + ': ' + update.content);
+  }
+  task.logPrivately(message + ': ' + JSON.parse(update.content).commit.sha.substring(0, 7));
 }
 
 async function updateGitHubRelease (owner, repository, releaseId, isDraft, isPrerelease) {
@@ -3510,17 +3557,24 @@ function processPrivateCommand (botId, bot, msg, command, commandArgsRaw) {
             break;
           }
           case '/bump': {
-            const checkoutVersionsTask = {
-              name: 'checkoutVersion',
-              displayName: 'Fetch latest version',
-              description: 'checkoutVersion',
-              cmd: '(git fetch && git checkout -f origin/main version.properties)'
-            };
-            build.tasks.push(checkoutVersionsTask);
             build.tasks.push({
               name: 'bumpVersion',
               displayName: 'Bump version code',
-              script: 'scripts/version_bump.sh'
+              act: (task, callback) => {
+                bumpVersionCode(task, build.git.remoteUrl, 'main').then(() => {
+                  callback(0);
+                }).catch((e) => {
+                  console.error('Cannot bump version code', e);
+                  task.logPrivately('Cannot bump version code: ' + e.message);
+                  callback(1);
+                });
+              }
+            });
+            build.tasks.push({
+              name: 'checkoutVersion',
+              displayName: 'Fetch bumped version',
+              description: 'checkoutVersion',
+              cmd: 'git fetch -q --no-tags --no-recurse-submodules origin main && git reset -q --hard FETCH_HEAD'
             });
             break;
           }
@@ -3535,6 +3589,7 @@ function processPrivateCommand (botId, bot, msg, command, commandArgsRaw) {
           );
           const changesUrl = fromToCommit ? '<a href="' + build.git.remoteUrl + '/compare/' + fromToCommit.commit_range + '">' + fromToCommit.commit_range + '</a>' : null;
           let result = null;
+          let taskTexts = null;
           if (isPublic) {
             const displayTrack =
               build.googlePlayTrack === 'production' ? 'stable' :
@@ -3566,7 +3621,7 @@ function processPrivateCommand (botId, bot, msg, command, commandArgsRaw) {
                 result += ' is canceling…';
               }
             } else if (build.endTime) {
-              result += ' <b>done.</b>';
+              result += build.error ? ' <b>failed.</b>' : ' <b>done.</b>';
             } else {
               result += ' in progress…';
             }
@@ -3651,11 +3706,11 @@ function processPrivateCommand (botId, bot, msg, command, commandArgsRaw) {
           } else if (build.endTime && (build.error || build.aborted) && isPublic) {
             result += 'Another build might be made soon.';
           } else {
+            taskTexts = [];
             for (let i = 0; i < build.tasks.length; i++) {
               let task = build.tasks[i];
               let needBold = false;
-              if (i > 0)
-                result += '\n';
+              let taskText = '';
               let taskStatus = '';
               if (task.finished) {
                 taskStatus = '<b>' + duration(task.startTime, task.endTime) + '</b>';
@@ -3678,43 +3733,62 @@ function processPrivateCommand (botId, bot, msg, command, commandArgsRaw) {
               const internalTaskName = task.displayName || task.name;
               let taskName = needBold ? '<b>' + internalTaskName + '</b>' : internalTaskName;
               if (taskStatus.length > 0) {
-                result += '• ' + taskName + ': ' + taskStatus;
+                taskText += '• ' + taskName + ': ' + taskStatus;
               } else {
-                result += '• ' + taskName;
+                taskText += '• ' + taskName;
               }
               const logs = isPublic ? task.publicLog : task.privateLog;
               if (logs) {
                 if (shorten) {
                   if (logs.length) {
-                    result += '\n&gt; ' + logs.length + ' log message' + (logs.length !== 1 ? 's' : '');
+                    taskText += '\n&gt; ' + logs.length + ' log message' + (logs.length !== 1 ? 's' : '');
                   }
                 } else {
                   logs.forEach((log) => {
-                    result += '\n&gt; <code>' + escapeHtml(trimIndent(log).trim()) + '</code>';
+                    taskText += '\n&gt; <code>' + escapeHtml(trimIndent(log).trim()) + '</code>';
                   });
                 }
               }
+              taskTexts.push({text: taskText, finished: !!task.finished});
             }
           }
+          let footer = '';
           const time = (build.endTime || build.estimateDuration) ? (build.endTime ? duration(build.startTime, build.endTime, true) : '~' + duration(0, Math.round(build.estimateDuration / 1000) * 1000, true)) : null;
           if (isPublic) {
             if (time) {
-              result += build.endTime ? '\n\n<i>Done in <b>' + time + '</b></i>' : '\n\n<i>Finishing in ' + time + '</i>';
+              footer += build.endTime ? '\n\n<i>Done in <b>' + time + '</b></i>' : '\n\n<i>Finishing in ' + time + '</i>';
             }
           } else {
-            result += '\n\n<i>' + cpuSignature + '</i>';
+            footer += '\n\n<i>' + cpuSignature + '</i>';
             if (time) {
-              result += ': <i> ' + time + '</i>';
+              footer += ': <i> ' + time + '</i>';
             }
           }
-          result = result.trim();
-          if (messageLength(result) > MAX_TEXT_MESSAGE_LENGTH) {
+          let hiddenTaskCount = 0;
+          const compose = () => {
+            let text = result;
+            if (taskTexts) {
+              const shownTexts = taskTexts.slice(hiddenTaskCount).map((taskText) => taskText.text);
+              if (hiddenTaskCount > 0) {
+                shownTexts.unshift('• … ' + hiddenTaskCount + ' finished task' + (hiddenTaskCount !== 1 ? 's' : ''));
+              }
+              text += shownTexts.join('\n');
+            }
+            return (text + footer).trim();
+          };
+          let text = compose();
+          if (messageLength(text) > MAX_TEXT_MESSAGE_LENGTH) {
             if (!shorten) {
               return build.asString(isPublic, true);
             }
-            result = limitMessageLength(result, MAX_TEXT_MESSAGE_LENGTH);
+            // Hide finished tasks from the top, so that the current or the failed one stays visible
+            while (taskTexts && hiddenTaskCount < taskTexts.length && taskTexts[hiddenTaskCount].finished && messageLength(text) > MAX_TEXT_MESSAGE_LENGTH) {
+              hiddenTaskCount++;
+              text = compose();
+            }
+            text = limitMessageLength(text, MAX_TEXT_MESSAGE_LENGTH);
           }
-          return result;
+          return text;
         };
         build.updateMessage = async (isFinal) => {
           if (build.publicChatId && build.publicMessageId) {
