@@ -1663,6 +1663,7 @@ function uploadToGooglePlay (bot, task, build, draftOnly, onDone) {
     });
 
     const uploadedVersionCodes = [];
+    const uploadedApks = [];
     let onBuildUploaded = (uploadedBuildVariant) => {
       if (--remainingApkCount !== 0)
         return;
@@ -1683,7 +1684,14 @@ function uploadToGooglePlay (bot, task, build, draftOnly, onDone) {
       }).then((updatedTrack) => {
         const appSubmitted = (appEdit) => {
           console.log('Successfully commited google play changes', JSON.stringify(appEdit.data));
-          tracePublishedGooglePlayBuild(build).then(() => {
+          // Only a committed edit takes version codes, those of an edit that failed can be uploaded again
+          (async () => {
+            const uploadDate = new Date();
+            for (const apk of uploadedApks) {
+              await traceMaxApkVersionCode(apk.sdkVariant, apk.abiVariant, apk.versionCode, uploadDate, 'googlePlay');
+            }
+            await tracePublishedGooglePlayBuild(build);
+          })().then(() => {
             onDone(0);
           });
         };
@@ -1696,6 +1704,12 @@ function uploadToGooglePlay (bot, task, build, draftOnly, onDone) {
           editId: editId
         }).then(appSubmitted)
           .catch((e) => {
+          // Play asks for changesNotSentForReview only when some changes can't be sent for review automatically,
+          // and refuses it when they are sent automatically
+          if (!(e && e.message && e.message.includes('changesNotSentForReview'))) {
+            appSubmitFailed(e);
+            return;
+          }
           reportGooglePlayError(bot, task, build, 'Failed to commit changes to Google Play ' + build.googlePlayTrack + ', retrying with changesNotSentForReview = true', e);
           play.edits.commit({
             editId: editId,
@@ -1726,7 +1740,7 @@ function uploadToGooglePlay (bot, task, build, draftOnly, onDone) {
           }
         }).then((uploadedApk) => {
           console.log('Successfully uploaded APK', JSON.stringify(uploadedApk.data));
-          traceMaxApkVersionCode(variant.name, abiVariant, uploadedApk.data.versionCode, new Date(), 'googlePlay');
+          uploadedApks.push({sdkVariant: variant.name, abiVariant, versionCode: uploadedApk.data.versionCode});
           if (uploadedApk.data.binary.sha256 !== files.apkFile.checksum.sha256) {
             console.error('SHA-256 mismatch!', variant.name, abiVariant);
             task.logPublicly('SHA-256 mismatch!');
