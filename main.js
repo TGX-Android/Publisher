@@ -1195,6 +1195,26 @@ function publishToTelegram (bot, task, build, sdkVariant, onDone, chatId, onlyPr
   }
 }
 
+function publishApkToTelegram (bot, task, build, sdkVariant, abiVariant, chatId, onDone) {
+  // The APK of the service chat, built with -PuseLegacyPackaging=true
+  const files = build.files[sdkVariant] ? build.files[sdkVariant][abiVariant] : null;
+  if (!files || !files.apkFile.remote_id) {
+    task.logPrivately('No APK of ' + sdkVariant + ' ' + abiVariant + ' in the service chat');
+    onDone(1);
+    return;
+  }
+  bot.sendDocument(chatId, files.apkFile.remote_id, {
+    caption: getBuildCaption(build, sdkVariant, abiVariant, true),
+    parse_mode: 'HTML'
+  }).then(() => {
+    onDone(0);
+  }).catch((error) => {
+    task.logPrivately('Cannot publish to ' + chatId + ': ' + error.message);
+    globalErrorHandler()(error);
+    onDone(1);
+  });
+}
+
 function uploadToTelegram (bot, task, build, sdkVariant, abiVariant, onDone) {
   const files = build.files[sdkVariant][abiVariant];
   if (!files) {
@@ -1650,7 +1670,34 @@ function reportGooglePlayError (bot, task, build, title, error) {
   sent.catch(globalErrorHandler());
 }
 
+// Entries that AGP keeps uncompressed without -PuseLegacyPackaging but that are compressed in the APK:
+// native libraries from minSdk 23 and dex from minSdk 28
+function findLegacyPackagedEntries (apkPath, sdkVariant) {
+  const minSdk = TDLIB_API_LEVELS[sdkVariant];
+  return new AdmZip(apkPath).getEntries().filter((entry) =>
+    entry.header.method !== 0 && (
+      (minSdk >= 23 && /^lib\/[^/]+\/[^/]+\.so$/.test(entry.entryName)) ||
+      (minSdk >= 28 && /^classes[0-9]*\.dex$/.test(entry.entryName))
+    )
+  ).map((entry) => entry.entryName);
+}
+
 function uploadToGooglePlay (bot, task, build, draftOnly, onDone) {
+  for (const variant of build.variants) {
+    for (const abiVariant of variant.abi) {
+      if (abiVariant === 'arm') {
+        continue;
+      }
+      const apkPath = build.files[variant.name][abiVariant].googlePlay.apkFile.path;
+      const entries = findLegacyPackagedEntries(apkPath, variant.name);
+      if (entries.length) {
+        const error = new Error(entries.length + ' compressed entries, e.g. ' + entries.slice(0, 3).join(', '));
+        reportGooglePlayError(bot, task, build, 'APK for Google Play ' + variant.name + ' ' + abiVariant + ' is built with -PuseLegacyPackaging', error);
+        onDone(1);
+        return;
+      }
+    }
+  }
   play.edits.insert().then((appEdit) => {
     console.log('Created an AppEdit', JSON.stringify(appEdit.data));
     const editId = appEdit.data.id;
@@ -3479,6 +3526,17 @@ function processPrivateCommand (botId, bot, msg, command, commandArgsRaw) {
                   return uploadToGooglePlay(bot, task, build, draftOnly, callback);
                 }
               });
+              if (build.googlePlayTrack === 'beta') {
+                build.tasks.push({
+                  name: 'publishTelegramBetaChannel',
+                  displayName: 'Publish to Telegram (beta)',
+                  // Once Google Play has the build, its failure cancels this
+                  needsAwait: true,
+                  act: (task, callback) => {
+                    return publishApkToTelegram(bot, task, build, 'latest', 'arm64', BETA_CHAT_ID, callback);
+                  }
+                });
+              }
             }
 
             if (build.huaweiTrack) {
