@@ -126,7 +126,7 @@ const ALL_PLATFORMS = ['googlePlay', 'huawei', 'github', 'telegram'];
 const GITHUB_BUILDS = {
   'latest': ['arm'],
   'qrs': ['arm'],
-  'tens': ['arm'],
+  'nop': ['arm'],
   'marshmallow': ['arm'],
   'lollipop': ['arm'],
   'legacy': ['arm32']
@@ -135,7 +135,7 @@ const GITHUB_BUILDS = {
 const TDLIB_API_LEVELS = {
   'latest': 33,
   'qrs': 29,
-  'tens': 24,
+  'nop': 24,
   'marshmallow': 23,
   'lollipop': 21,
   'legacy': 16
@@ -1046,7 +1046,7 @@ function getBuildCaption (build, sdkVariant, abiVariant, shortenChecksums) {
       caption += '\n<b>Supports</b>: Android 10-12 only'
       break;
     }
-    case 'tens': {
+    case 'nop': {
       caption += '\n<b>Supports</b>: Android 7.0-9.0 only (Nougat, Oreo, Pie)'
       break;
     }
@@ -2358,7 +2358,7 @@ function uploadToGithub (task, build, onDone, commandArgsRaw, isPrerelease, tagN
   const allSdkFlavors = [
     'latest',
     'qrs',
-    'tens',
+    'nop',
     'marshmallow',
     'lollipop',
     'legacy'
@@ -2735,11 +2735,11 @@ function processPrivateCommand (botId, bot, msg, command, commandArgsRaw) {
     case '/build_qrsX86':
     case '/build_qrsX64':
 
-    case '/build_tens':
-    case '/build_tensArm32':
-    case '/build_tensArm64':
-    case '/build_tensX86':
-    case '/build_tensX64':
+    case '/build_nop':
+    case '/build_nopArm32':
+    case '/build_nopArm64':
+    case '/build_nopX86':
+    case '/build_nopX64':
 
     case '/build_marshmallow':
     case '/build_marshmallowArm32':
@@ -2800,7 +2800,7 @@ function processPrivateCommand (botId, bot, msg, command, commandArgsRaw) {
         const allVariants = [
           {name: 'latest', abi: [ 'arm', 'arm64', 'arm32', 'x64', 'x86' ]},
           {name: 'qrs', abi: [ 'arm', 'arm64', 'arm32', 'x64', 'x86' ]},
-          {name: 'tens', abi: [ 'arm', 'arm64', 'arm32', 'x64', 'x86' ]},
+          {name: 'nop', abi: [ 'arm', 'arm64', 'arm32', 'x64', 'x86' ]},
           {name: 'marshmallow', abi: [ 'arm', 'arm64', 'arm32', 'x64', 'x86' ]},
           {name: 'lollipop', abi: [ 'arm', 'arm64', 'arm32', 'x64', 'x86' ]},
           {name: 'legacy', abi: [ 'arm32', 'x86' ]}
@@ -2818,7 +2818,7 @@ function processPrivateCommand (botId, bot, msg, command, commandArgsRaw) {
             break;
           case 'latest':
           case 'qrs':
-          case 'tens':
+          case 'nop':
           case 'marshmallow':
           case 'lollipop':
           case 'legacy':
@@ -3749,7 +3749,7 @@ function processPrivateCommand (botId, bot, msg, command, commandArgsRaw) {
                   case 'qrs':
                     result += '\nAndroid 10-12';
                     break;
-                  case 'tens':
+                  case 'nop':
                     result += '\nAndroid 7.0–9.0 (Nougat, Oreo, Pie)';
                     break;
                   case 'marshmallow':
