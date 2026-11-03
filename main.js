@@ -131,6 +131,12 @@ const GITHUB_BUILDS = {
   'lollipop': ['arm'],
   'legacy': ['arm32']
 };
+// APKs of a beta in its channel, one album: those of GitHub, which is blocked in some countries,
+// e.g. Iran, with latest for arm64
+const BETA_CHANNEL_APKS = Object.keys(GITHUB_BUILDS).flatMap((sdkVariant) =>
+  sdkVariant === 'latest' ? [['latest', 'arm64']] :
+    GITHUB_BUILDS[sdkVariant].map((abiVariant) => [sdkVariant, abiVariant])
+);
 // TDLib is built for minimum API level of each flavor, see tdlib/source/install.sh
 const TDLIB_API_LEVELS = {
   'latest': 33,
@@ -1195,18 +1201,24 @@ function publishToTelegram (bot, task, build, sdkVariant, onDone, chatId, onlyPr
   }
 }
 
-function publishApkToTelegram (bot, task, build, sdkVariant, abiVariant, chatId, onDone) {
-  // The APK of the service chat, built with -PuseLegacyPackaging=true
-  const files = build.files[sdkVariant] ? build.files[sdkVariant][abiVariant] : null;
-  if (!files || !files.apkFile.remote_id) {
-    task.logPrivately('No APK of ' + sdkVariant + ' ' + abiVariant + ' in the service chat');
-    onDone(1);
-    return;
+function publishApksToTelegram (bot, task, build, apks, chatId, onDone) {
+  // APKs of the service chat, built with -PuseLegacyPackaging=true
+  const docs = [];
+  for (const [sdkVariant, abiVariant] of apks) {
+    const files = build.files[sdkVariant] ? build.files[sdkVariant][abiVariant] : null;
+    if (!files || !files.apkFile.remote_id) {
+      task.logPrivately('No APK of ' + sdkVariant + ' ' + abiVariant + ' in the service chat');
+      onDone(1);
+      return;
+    }
+    docs.push({
+      type: 'document',
+      media: files.apkFile.remote_id,
+      caption: getBuildCaption(build, sdkVariant, abiVariant, true),
+      parse_mode: 'HTML'
+    });
   }
-  bot.sendDocument(chatId, files.apkFile.remote_id, {
-    caption: getBuildCaption(build, sdkVariant, abiVariant, true),
-    parse_mode: 'HTML'
-  }).then(() => {
+  bot.sendMediaGroup(chatId, docs).then(() => {
     onDone(0);
   }).catch((error) => {
     task.logPrivately('Cannot publish to ' + chatId + ': ' + error.message);
@@ -3533,7 +3545,7 @@ function processPrivateCommand (botId, bot, msg, command, commandArgsRaw) {
                   // Once Google Play has the build, its failure cancels this
                   needsAwait: true,
                   act: (task, callback) => {
-                    return publishApkToTelegram(bot, task, build, 'latest', 'arm64', BETA_CHAT_ID, callback);
+                    return publishApksToTelegram(bot, task, build, BETA_CHANNEL_APKS, BETA_CHAT_ID, callback);
                   }
                 });
               }
