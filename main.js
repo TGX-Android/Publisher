@@ -500,6 +500,36 @@ async function updatePublisher () {
   return {restart: true, text: text + '\nRestarting…'};
 }
 
+async function pushDevelopmentToMain () {
+  const run = (command) => new Promise((resolve, reject) => {
+    exec(command, {cwd: settings.TGX_SOURCE_PATH}, (error, stdout, stderr) => {
+      if (error) {
+        reject(new Error((stderr || error.message).trim()));
+      } else {
+        resolve(stdout.trim());
+      }
+    });
+  });
+
+  await run('git fetch -q --no-tags --no-recurse-submodules private development');
+  const commit = await run('git rev-parse FETCH_HEAD');
+  const title = await run(`git log -1 --format=%s ${commit}`);
+  let text = '<code>' + commit.substring(0, 7) + '</code> ' + escapeHtml(title) + ' of <b>private/development</b>:';
+  for (const remote of ['private', 'public']) {
+    try {
+      // Fast-forward only: main that went its own way is reported, never overwritten
+      const status = (await run(`git push --porcelain ${remote} ${commit}:refs/heads/main`)).split('\n')
+        .map((line) => line.split('\t'))
+        .find((fields) => fields.length >= 3 && fields[1].endsWith(':refs/heads/main'));
+      text += '\n<b>' + remote + '/main</b>: ' + escapeHtml(status ? status[2] : 'pushed');
+    } catch (error) {
+      text += '\n<b>' + remote + '/main</b>: failed:\n<pre>' + escapeHtml(error.message) + '</pre>';
+      break;
+    }
+  }
+  return text;
+}
+
 function getGitData (callback) {
   exec('echo "$(git rev-parse --short HEAD) $(git rev-parse HEAD) $(git show -s --format=%ct) $(git config --get remote.origin.url) $(git rev-parse --abbrev-ref HEAD) $(git log -1 --pretty=format:\'%an\')"', {cwd: settings.TGX_SOURCE_PATH}, (error, stdout, stderr) => {
     if (error) {
@@ -2709,6 +2739,18 @@ function processPrivateCommand (botId, bot, msg, command, commandArgsRaw) {
         }
       }, (error) => {
         bot.sendMessage(msg.chat.id, 'Update failed:\n<pre>' + escapeHtml(error.message) + '</pre>', {parse_mode: 'HTML'}).catch(globalErrorHandler());
+      });
+      break;
+    }
+    case '/push': {
+      if (cur.pending_build) {
+        bot.sendMessage(msg.chat.id, 'Cannot push, as some build is in progress. Use /abort to cancel it.').catch(globalErrorHandler());
+        break;
+      }
+      pushDevelopmentToMain().then((text) => {
+        bot.sendMessage(msg.chat.id, text, {parse_mode: 'HTML'}).catch(globalErrorHandler());
+      }, (error) => {
+        bot.sendMessage(msg.chat.id, 'Push failed:\n<pre>' + escapeHtml(error.message) + '</pre>', {parse_mode: 'HTML'}).catch(globalErrorHandler());
       });
       break;
     }
