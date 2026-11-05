@@ -734,7 +734,7 @@ function escapeMarkdown (text) {
 function escapeHtml (text) {
   if (!text)
     return text;
-  return text.replace(/</g, '&lt;').replace(/>/g, '&gt;');
+  return text.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
 }
 
 function trimIndent (text) {
@@ -2662,7 +2662,7 @@ function processPrivateCommand (botId, bot, msg, command, commandArgsRaw) {
           if (err) {
             bot.sendMessage(msg.chat.id, '*Key not found!*', {parse_mode: 'MarkdownV2'}).catch(globalErrorHandler());
           } else {
-            bot.sendMessage(msg.chat.id, '<code>' + JSON.stringify(value) + '</code>', {parse_mode: 'HTML'}).catch(globalErrorHandler());
+            bot.sendMessage(msg.chat.id, '<code>' + escapeHtml(JSON.stringify(value)) + '</code>', {parse_mode: 'HTML'}).catch(globalErrorHandler());
           }
         });
       } else {
@@ -2674,7 +2674,7 @@ function processPrivateCommand (botId, bot, msg, command, commandArgsRaw) {
       let keys = [];
       db.createReadStream({values: false})
       .on('data', (data)  => {
-        keys.push('<code>' + data + '</code>');
+        keys.push('<code>' + escapeHtml(data) + '</code>');
       })
       .on('end', () => {
         sendArray(bot, msg.chat.id, keys, 'HTML');
@@ -2685,7 +2685,7 @@ function processPrivateCommand (botId, bot, msg, command, commandArgsRaw) {
       let values = [];
       db.createReadStream()
       .on('data', (data) => {
-        values.push('<code>' + data.key + '</code>:\n<pre>' + data.value + '</pre>');
+        values.push('<code>' + escapeHtml(data.key) + '</code>:\n<pre>' + escapeHtml(data.value) + '</pre>');
       })
       .on('end', () => {
         sendArray(bot, msg.chat.id, values, 'HTML', '\n\n');
@@ -2706,7 +2706,7 @@ function processPrivateCommand (botId, bot, msg, command, commandArgsRaw) {
           let text = '<b>App Version</b>: <code>' + version.name + '</code>\n';
           text += '<b>Commit</b>: <a href="' + gitData.remoteUrl + '/tree/' + gitData.commit.long + '">' + gitData.commit.short + '</a>';
           if (gitData.branch) {
-            text += '\n<b>Branch</b>: <code>' + gitData.branch + '</code>';
+            text += '\n<b>Branch</b>: <code>' + escapeHtml(gitData.branch) + '</code>';
           }
           bot.sendMessage(msg.chat.id, text, {parse_mode: 'HTML'}).catch(globalErrorHandler());
         });
@@ -2757,7 +2757,7 @@ function processPrivateCommand (botId, bot, msg, command, commandArgsRaw) {
     case '/pull': {
       if (!cur.pending_build) {
         gitPull((log) => {
-          bot.sendMessage(msg.chat.id, '<code>' + log + '</code>', {parse_mode: 'HTML'}).catch(globalErrorHandler());
+          bot.sendMessage(msg.chat.id, '<code>' + escapeHtml(log) + '</code>', {parse_mode: 'HTML'}).catch(globalErrorHandler());
         });
       } else {
         bot.sendMessage(msg.chat.id, 'Cannot pull fresh code, as some build is in progress. Use /abort to cancel it.');
@@ -3007,8 +3007,9 @@ function processPrivateCommand (botId, bot, msg, command, commandArgsRaw) {
 
         if (build.git.branch !== 'main' && ['production'/*, 'beta'*/].includes(build.googlePlayTrack)) {
           bot.sendMessage(msg.chat.id,
-            'You are currently on a <b>' + build.git.branch + '</b> branch. Only <b>main</b> branch can be published.'
-          );
+            'You are currently on a <b>' + escapeHtml(build.git.branch) + '</b> branch. Only <b>main</b> branch can be published.',
+            {parse_mode: 'HTML'}
+          ).catch(globalErrorHandler());
           return;
         }
 
@@ -3739,7 +3740,7 @@ function processPrivateCommand (botId, bot, msg, command, commandArgsRaw) {
 
             result += '\n';
           } else {
-            result = '<code>' + command + (isPrivate && commandArgsRaw ? ' ' + commandArgsRaw : '') + '</code>';
+            result = '<code>' + command + (isPrivate && commandArgsRaw ? ' ' + escapeHtml(commandArgsRaw) : '') + '</code>';
             if (build.aborted) {
               if (build.endTime) {
                 result += ' <b>canceled</b>.';
@@ -4493,7 +4494,7 @@ function sorted (unordered) {
 
 botMap['private'].sendMessage(ADMIN_USER_ID,
   '<b>Bot has started.</b>\n\nPID: <code>' + process.pid +
-  '</code>\npwd: <code>' + process.cwd() + '</code>\nenv:\n<pre>' +
-  JSON.stringify(sorted(process.env), null, 2) +
+  '</code>\npwd: <code>' + escapeHtml(process.cwd()) + '</code>\nenv:\n<pre>' +
+  escapeHtml(JSON.stringify(sorted(process.env), null, 2)) +
   '</pre>', {parse_mode: 'HTML'}
 ).catch(globalErrorHandler());
