@@ -508,29 +508,30 @@ async function pushDevelopmentToMain () {
     });
   });
 
-  const isAncestor = (ancestor, commit) => new Promise((resolve) => {
-    exec(`git merge-base --is-ancestor ${ancestor} ${commit}`, {cwd: settings.TGX_SOURCE_PATH}, (error) => {
-      resolve(!error);
-    });
-  });
-
   await run('git fetch -q --no-tags --no-recurse-submodules private development');
   const development = await run('git rev-parse FETCH_HEAD');
   await run('git fetch -q --no-tags --no-recurse-submodules public main');
   const publicMain = await run('git rev-parse FETCH_HEAD');
+  const onlyInDevelopment = parseInt(await run(`git rev-list --count ${publicMain}..${development}`));
+  const onlyInPublicMain = parseInt(await run(`git rev-list --count ${development}..${publicMain}`));
 
   let commit, source;
-  if (await isAncestor(development, publicMain)) {
+  if (onlyInDevelopment === 0) {
     // public/main may have commits on top of development, e.g. merged pull requests
     commit = publicMain;
-    const count = parseInt(await run(`git rev-list --count ${development}..${publicMain}`));
-    source = count > 0 ? '<b>public/main</b>, ' + count + ' on top of <b>private/development</b>' : '<b>private/development</b>';
-  } else if (await isAncestor(publicMain, development)) {
+    source = onlyInPublicMain > 0 ?
+      '<b>public/main</b>, ' + onlyInPublicMain + ' on top of <b>private/development</b>' :
+      '<b>private/development</b>';
+  } else if (onlyInPublicMain === 0) {
     commit = development;
     source = '<b>private/development</b>';
   } else {
-    const count = parseInt(await run(`git rev-list --count ${development}..${publicMain}`));
-    throw new Error(`private/development and public/main have diverged: merge the ${count} commits of public/main into development first`);
+    const shallow = (await run('git rev-parse --is-shallow-repository')) === 'true';
+    throw new Error(
+      `private/development ${development.substring(0, 7)} and public/main ${publicMain.substring(0, 7)} have diverged: ` +
+      `${onlyInDevelopment} commits only in development, ${onlyInPublicMain} only in public/main` +
+      (shallow ? '; the clone is shallow, so its history may be cut' : '')
+    );
   }
   const title = await run(`git log -1 --format=%s ${commit}`);
   let text = '<code>' + commit.substring(0, 7) + '</code> ' + escapeHtml(title) + ' of ' + source + ':';
