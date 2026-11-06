@@ -511,10 +511,32 @@ async function pushDevelopmentToMain () {
     });
   });
 
+  const isAncestor = (ancestor, commit) => new Promise((resolve) => {
+    exec(`git merge-base --is-ancestor ${ancestor} ${commit}`, {cwd: settings.TGX_SOURCE_PATH}, (error) => {
+      resolve(!error);
+    });
+  });
+
   await run('git fetch -q --no-tags --no-recurse-submodules private development');
-  const commit = await run('git rev-parse FETCH_HEAD');
+  const development = await run('git rev-parse FETCH_HEAD');
+  await run('git fetch -q --no-tags --no-recurse-submodules public main');
+  const publicMain = await run('git rev-parse FETCH_HEAD');
+
+  let commit, source;
+  if (await isAncestor(development, publicMain)) {
+    // public/main may have commits on top of development, e.g. merged pull requests
+    commit = publicMain;
+    const count = parseInt(await run(`git rev-list --count ${development}..${publicMain}`));
+    source = count > 0 ? '<b>public/main</b>, ' + count + ' on top of <b>private/development</b>' : '<b>private/development</b>';
+  } else if (await isAncestor(publicMain, development)) {
+    commit = development;
+    source = '<b>private/development</b>';
+  } else {
+    const count = parseInt(await run(`git rev-list --count ${development}..${publicMain}`));
+    throw new Error(`private/development and public/main have diverged: merge the ${count} commits of public/main into development first`);
+  }
   const title = await run(`git log -1 --format=%s ${commit}`);
-  let text = '<code>' + commit.substring(0, 7) + '</code> ' + escapeHtml(title) + ' of <b>private/development</b>:';
+  let text = '<code>' + commit.substring(0, 7) + '</code> ' + escapeHtml(title) + ' of ' + source + ':';
   for (const remote of ['private', 'public']) {
     try {
       // Fast-forward only: main that went its own way is reported, never overwritten
