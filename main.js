@@ -4484,7 +4484,13 @@ async function onExit (signal, arg1, arg2, callback) {
       return;
 
     if (!isOffline()) {
-      botMap['private'].sendMessage(ADMIN_USER_ID, '*' + signal + '* received, bot is stopping\\.\\.\\.', {parse_mode: 'MarkdownV2'}).catch(globalErrorHandler());
+      let text = '<b>' + signal + '</b> received, bot is stopping…';
+      if (signal === 'uncaughtException') {
+        const stack = arg1 instanceof Error && arg1.stack ? arg1.stack : String(arg1);
+        // Telegram takes up to 4096 characters
+        text += '\n<pre>' + escapeHtml(stack.length > 3500 ? stack.substring(0, 3500) + '…' : stack) + '</pre>';
+      }
+      botMap['private'].sendMessage(ADMIN_USER_ID, text, {parse_mode: 'HTML'}).catch(globalErrorHandler());
     }
 
     onExit(signal, arg1, arg2, () => {
