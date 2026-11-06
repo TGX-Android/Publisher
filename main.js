@@ -508,6 +508,12 @@ async function pushDevelopmentToMain () {
     });
   });
 
+  // A shallow clone cuts the history that tells whether one branch contains the other
+  let unshallowed = false;
+  if ((await run('git rev-parse --is-shallow-repository')) === 'true') {
+    await run('git fetch -q --no-tags --no-recurse-submodules --unshallow public');
+    unshallowed = true;
+  }
   await run('git fetch -q --no-tags --no-recurse-submodules private development');
   const development = await run('git rev-parse FETCH_HEAD');
   await run('git fetch -q --no-tags --no-recurse-submodules public main');
@@ -534,7 +540,8 @@ async function pushDevelopmentToMain () {
     );
   }
   const title = await run(`git log -1 --format=%s ${commit}`);
-  let text = '<code>' + commit.substring(0, 7) + '</code> ' + escapeHtml(title) + ' of ' + source + ':';
+  let text = (unshallowed ? 'The clone was shallow, made complete.\n' : '') +
+    '<code>' + commit.substring(0, 7) + '</code> ' + escapeHtml(title) + ' of ' + source + ':';
   for (const remote of ['private', 'public']) {
     try {
       // Fast-forward only: main that went its own way is reported, never overwritten
