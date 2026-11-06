@@ -443,10 +443,7 @@ function getCommitDate (callback) {
 
 function gitPull (callback) {
   exec('git pull', {cwd: settings.TGX_SOURCE_PATH}, (error, stdout, stderr) => {
-    if (error) {
-      throw error;
-    }
-    callback(stdout);
+    callback(error ? new Error((stderr || error.message).trim()) : null, stdout);
   });
 }
 
@@ -2778,8 +2775,11 @@ function processPrivateCommand (botId, bot, msg, command, commandArgsRaw) {
     }
     case '/pull': {
       if (!cur.pending_build) {
-        gitPull((log) => {
-          bot.sendMessage(msg.chat.id, '<code>' + escapeHtml(log) + '</code>', {parse_mode: 'HTML'}).catch(globalErrorHandler());
+        gitPull((error, log) => {
+          const text = error ?
+            'git pull failed:\n<pre>' + escapeHtml(error.message) + '</pre>' :
+            '<code>' + escapeHtml(log) + '</code>';
+          bot.sendMessage(msg.chat.id, text, {parse_mode: 'HTML'}).catch(globalErrorHandler());
         });
       } else {
         bot.sendMessage(msg.chat.id, 'Cannot pull fresh code, as some build is in progress. Use /abort to cancel it.');
