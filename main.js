@@ -984,7 +984,13 @@ function getBuildFiles (build, sdkVariant, abiVariant, forGooglePlay, callback) 
     let targetMappingFile = null;
     if (fs.existsSync(mappingFile)) {
       targetMappingFile = {path: path.join(targetDir, path.parse(element.outputFile).name + '.txt')};
-      await fs.promises.copyFile(mappingFile, targetMappingFile.path);
+      // Splits share one mapping, and Google Play keeps an identical one for one versionCode only
+      const header = '# versionCode: ' + element.versionCode + '\n';
+      await fs.promises.writeFile(targetMappingFile.path, header);
+      await fs.promises.appendFile(targetMappingFile.path, await fs.promises.readFile(mappingFile));
+      targetMappingFile.checksum = await new Promise((accept) => {
+        checksum(mappingFile, (err, hash) => accept(err ? null : hash), 'sha256');
+      });
     }
 
     let targetNativeDebugSymbolsFile = null;
@@ -1309,6 +1315,16 @@ function uploadToTelegram (bot, task, build, sdkVariant, abiVariant, onDone) {
     if (!files.mappingFile) { // Mapping file doesn't exist for builds made with --dontobfuscate option
       onDone(0);
       return;
+    }
+    // ABIs of a variant share one mapping, so it's sent once
+    const mappingChecksum = files.mappingFile.checksum;
+    build.sentMappings = build.sentMappings || new Set();
+    if (mappingChecksum) {
+      if (build.sentMappings.has(mappingChecksum)) {
+        onDone(0);
+        return;
+      }
+      build.sentMappings.add(mappingChecksum);
     }
     attemptAction(maxUploadAttemptCount, (accept, reject) => {
       bot.sendDocument(build.serviceChatId, fs.createReadStream(files.mappingFile.path), {
